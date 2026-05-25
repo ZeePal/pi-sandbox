@@ -1,0 +1,16 @@
+# Rust build output
+/target/
+
+# Pi local state
+/.pi/
+
+# JS / TS local deps or build output
+node_modules/
+dist/
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo

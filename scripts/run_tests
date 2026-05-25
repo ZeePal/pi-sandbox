@@ -1,0 +1,419 @@
+#!/usr/bin/env bash
+set -u -o pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+RED=$'\033[31m'
+GREEN=$'\033[32m'
+BLUE=$'\033[34m'
+BOLD=$'\033[1m'
+RESET=$'\033[0m'
+
+PASS_COUNT=0
+FAIL_COUNT=0
+SESSION_ID="run-tests-session"
+TEST_ROOT=""
+PI_SANDBOX_BIN=""
+
+pass() {
+    PASS_COUNT=$((PASS_COUNT + 1))
+    printf '%sPASS%s %s\n' "$GREEN" "$RESET" "$1"
+}
+
+fail() {
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    printf '%sFAIL%s %s\n' "$RED" "$RESET" "$1"
+    if [[ $# -ge 2 && -n "$2" ]]; then
+        printf '%s\n' "$2" | sed 's/^/    /'
+    fi
+}
+
+cleanup() {
+    if [[ -n "$TEST_ROOT" && -d "$TEST_ROOT" ]]; then
+        rm -rf "$TEST_ROOT"
+    fi
+}
+trap cleanup EXIT
+
+need_cmd() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        printf '%sMissing required command:%s %s\n' "$RED" "$RESET" "$1" >&2
+        exit 1
+    fi
+}
+
+ensure_binary() {
+    local requested="${1:-}"
+
+    case "$requested" in
+    "")
+        PI_SANDBOX_BIN="pi-sandbox"
+        ;;
+    debug)
+        PI_SANDBOX_BIN="$ROOT_DIR/target/debug/pi-sandbox"
+        ;;
+    release)
+        PI_SANDBOX_BIN="$ROOT_DIR/target/release/pi-sandbox"
+        ;;
+    *)
+        PI_SANDBOX_BIN="$requested"
+        ;;
+    esac
+
+    if ! command -v curl >/dev/null 2>&1; then
+        printf '%sMissing required command:%s curl\n' "$RED" "$RESET" >&2
+        exit 1
+    fi
+
+    if [[ "$PI_SANDBOX_BIN" == "pi-sandbox" ]]; then
+        if ! command -v "$PI_SANDBOX_BIN" >/dev/null 2>&1; then
+            printf '%sCould not find pi-sandbox on PATH.%s\n' "$RED" "$RESET" >&2
+            exit 1
+        fi
+        return
+    fi
+
+    if [[ ! -x "$PI_SANDBOX_BIN" ]]; then
+        printf '%sConfigured pi-sandbox binary is not executable:%s %s\n' "$RED" "$RESET" "$PI_SANDBOX_BIN" >&2
+        exit 1
+    fi
+}
+
+write_project_config() {
+    local case_dir="$1"
+    local restricted_allow_mode="$2"
+    mkdir -p "$case_dir/.pi"
+
+    local allow_block='[]'
+    if [[ "$restricted_allow_mode" == "allow-google" ]]; then
+        allow_block='["google.com"]'
+    fi
+
+    cat >"$case_dir/.pi/sandbox.json" <<EOF
+{
+  "network_proxy": {
+    "allow": $allow_block,
+    "deny": [],
+    "allowLocal": false
+  }
+}
+EOF
+}
+
+json_expect_ok_with_text() {
+    local json_text="$1"
+    local expected_text="$2"
+    [[ "$json_text" == *'"ok":true'* && "$json_text" == *"$expected_text"* ]]
+}
+
+json_expect_ok() {
+    local json_text="$1"
+    [[ "$json_text" == *'"ok":true'* ]]
+}
+
+json_expect_not_ok() {
+    local json_text="$1"
+    [[ "$json_text" == *'"ok":false'* ]]
+}
+
+run_tool_read_test() {
+    local fs="$1"
+    local net="$2"
+    local case_dir="$3"
+    local label="tool read [$fs/$net]"
+    local stderr_file="$TEST_ROOT/stderr-tool-read-${fs}-${net}.log"
+    local stdout status
+
+    stdout="$(printf '%s' '{"path":"input.txt"}' | HOME="$TEST_ROOT/home" "$PI_SANDBOX_BIN" tool read --fs "$fs" --net "$net" --cwd "$case_dir" --session "$SESSION_ID" --approval deny 2>"$stderr_file")"
+    status=$?
+    local stderr=''
+    stderr="$(cat "$stderr_file")"
+
+    if [[ $status -ne 0 ]]; then
+        fail "$label" "exit=$status\nstderr=$stderr\nstdout=$stdout"
+        return
+    fi
+
+    if json_expect_ok_with_text "$stdout" "seed-data-$fs-$net"; then
+        pass "$label"
+    else
+        fail "$label" "stderr=$stderr\nstdout=$stdout"
+    fi
+}
+
+run_tool_write_test() {
+    local fs="$1"
+    local net="$2"
+    local case_dir="$3"
+    local label="tool write [$fs/$net]"
+    local stderr_file="$TEST_ROOT/stderr-tool-write-${fs}-${net}.log"
+    local stdout status
+    local content="tool-write-$fs-$net"
+    local target="$case_dir/tool-write.txt"
+
+    stdout="$(printf '%s' "{\"path\":\"tool-write.txt\",\"content\":\"$content\"}" | HOME="$TEST_ROOT/home" "$PI_SANDBOX_BIN" tool write --fs "$fs" --net "$net" --cwd "$case_dir" --session "$SESSION_ID" --approval deny 2>"$stderr_file")"
+    status=$?
+    local stderr=''
+    stderr="$(cat "$stderr_file")"
+
+    if [[ "$fs" == "readonly" ]]; then
+        if [[ $status -eq 0 ]] && json_expect_not_ok "$stdout" && [[ ! -e "$target" ]]; then
+            pass "$label"
+        else
+            fail "$label" "expected readonly write to fail\nexit=$status\nstderr=$stderr\nstdout=$stdout"
+        fi
+        return
+    fi
+
+    if [[ $status -ne 0 ]]; then
+        fail "$label" "exit=$status\nstderr=$stderr\nstdout=$stdout"
+        return
+    fi
+
+    if json_expect_ok "$stdout" && [[ -f "$target" ]] && [[ "$(cat "$target")" == "$content" ]]; then
+        pass "$label"
+        rm -f "$target"
+    else
+        fail "$label" "stderr=$stderr\nstdout=$stdout"
+    fi
+}
+
+run_cmd_read_test() {
+    local fs="$1"
+    local net="$2"
+    local case_dir="$3"
+    local label="run read [$fs/$net]"
+    local stderr_file="$TEST_ROOT/stderr-run-read-${fs}-${net}.log"
+    local stdout status
+
+    local expected_text="seed-data-$fs-$net"
+    stdout="$(HOME="$TEST_ROOT/home" "$PI_SANDBOX_BIN" run --fs "$fs" --net "$net" --cwd "$case_dir" --session "$SESSION_ID" --approval deny -- sh -lc "test \"\$(cat input.txt)\" = \"$expected_text\"" 2>"$stderr_file")"
+    status=$?
+    local stderr=''
+    stderr="$(cat "$stderr_file")"
+
+    if [[ $status -eq 0 ]]; then
+        pass "$label"
+    else
+        fail "$label" "exit=$status\nstderr=$stderr\nstdout=$stdout"
+    fi
+}
+
+run_cmd_write_test() {
+    local fs="$1"
+    local net="$2"
+    local case_dir="$3"
+    local label="run write [$fs/$net]"
+    local stderr_file="$TEST_ROOT/stderr-run-write-${fs}-${net}.log"
+    local stdout status
+    local target="$case_dir/cmd-write.txt"
+    local content="cmd-write-$fs-$net"
+
+    stdout="$(HOME="$TEST_ROOT/home" "$PI_SANDBOX_BIN" run --fs "$fs" --net "$net" --cwd "$case_dir" --session "$SESSION_ID" --approval deny -- sh -lc "printf '%s' '$content' > cmd-write.txt" 2>"$stderr_file")"
+    status=$?
+    local stderr=''
+    stderr="$(cat "$stderr_file")"
+
+    if [[ "$fs" == "readonly" ]]; then
+        if [[ $status -ne 0 ]] && [[ ! -e "$target" ]]; then
+            pass "$label"
+        else
+            fail "$label" "expected readonly write to fail\nexit=$status\nstderr=$stderr\nstdout=$stdout"
+        fi
+        return
+    fi
+
+    if [[ $status -eq 0 ]] && [[ -f "$target" ]] && [[ "$(cat "$target")" == "$content" ]]; then
+        pass "$label"
+        rm -f "$target"
+    else
+        fail "$label" "exit=$status\nstderr=$stderr\nstdout=$stdout"
+    fi
+}
+
+run_network_command() {
+    local fs="$1"
+    local net="$2"
+    local case_dir="$3"
+    local stderr_file="$4"
+
+    HOME="$TEST_ROOT/home" "$PI_SANDBOX_BIN" run --fs "$fs" --net "$net" --cwd "$case_dir" --session "$SESSION_ID" --approval deny -- curl -fsS --max-time 15 https://google.com >/dev/null 2>"$stderr_file"
+}
+
+run_network_test() {
+    local fs="$1"
+    local net="$2"
+    local case_dir="$3"
+    local policy_mode="$4"
+    local expect_success="$5"
+    local label="network ${policy_mode} [$fs/$net]"
+    local stderr_file="$TEST_ROOT/stderr-network-${policy_mode}-${fs}-${net}.log"
+
+    write_project_config "$case_dir" "$policy_mode"
+    run_network_command "$fs" "$net" "$case_dir" "$stderr_file"
+    local status=$?
+    local stderr=''
+    stderr="$(cat "$stderr_file")"
+
+    if [[ "$expect_success" == "yes" ]]; then
+        if [[ $status -eq 0 ]]; then
+            pass "$label"
+        else
+            fail "$label" "expected network success\nexit=$status\nstderr=$stderr"
+        fi
+    else
+        if [[ $status -ne 0 ]]; then
+            pass "$label"
+        else
+            fail "$label" "expected network failure but command succeeded"
+        fi
+    fi
+}
+
+run_tool_bash_external_jsonl_test() {
+    local case_dir="$TEST_ROOT/work/external-jsonl"
+    local label="tool bash external jsonl approval"
+    local stderr_file="$TEST_ROOT/stderr-tool-bash-external-jsonl.log"
+    local approval_line result_line wait_status sandbox_in sandbox_out
+
+    rm -rf "$case_dir"
+    mkdir -p "$case_dir"
+    write_project_config "$case_dir" "deny-all"
+
+    coproc SANDBOX { HOME="$TEST_ROOT/home" "$PI_SANDBOX_BIN" tool bash --fs write --net restricted --cwd "$case_dir" --session "$SESSION_ID" --approval external 2>"$stderr_file"; }
+    sandbox_in="${SANDBOX[1]}"
+    sandbox_out="${SANDBOX[0]}"
+
+    printf '%s\n' '{"type":"start","payload":{"command":"curl -fsS --max-time 15 https://google.com >/dev/null","timeout":30}}' >&"$sandbox_in"
+
+    if ! IFS= read -r approval_line <&"$sandbox_out"; then
+        fail "$label" "expected approval_request frame"
+        eval "exec ${sandbox_in}>&-"
+        wait "$SANDBOX_PID" 2>/dev/null || true
+        return
+    fi
+
+    if [[ "$approval_line" != *'"type":"approval_request"'* || "$approval_line" != *'"id":"network#https_connect#google.com#443"'* ]]; then
+        fail "$label" "unexpected approval frame: $approval_line"
+        eval "exec ${sandbox_in}>&-"
+        wait "$SANDBOX_PID" 2>/dev/null || true
+        return
+    fi
+
+    printf '%s\n' '{"type":"approval_response","id":"network#https_connect#google.com#443","decision":"allow_once"}' >&"$sandbox_in"
+
+    if ! IFS= read -r result_line <&"$sandbox_out"; then
+        fail "$label" "expected result frame after approval"
+        eval "exec ${sandbox_in}>&-"
+        wait "$SANDBOX_PID" 2>/dev/null || true
+        return
+    fi
+
+    eval "exec ${sandbox_in}>&-"
+    wait "$SANDBOX_PID"
+    wait_status=$?
+
+    if [[ $wait_status -eq 0 && "$result_line" == *'"type":"result"'* && "$result_line" == *'"exitCode":0'* ]]; then
+        pass "$label"
+    else
+        fail "$label" "exit=$wait_status\nstderr=$(cat "$stderr_file")\napproval=$approval_line\nresult=$result_line"
+    fi
+}
+
+run_tool_bash_external_stdin_close_test() {
+    local case_dir="$TEST_ROOT/work/external-jsonl-stdin-close"
+    local label="tool bash external stdin close cancels"
+    local stderr_file="$TEST_ROOT/stderr-tool-bash-external-stdin-close.log"
+    local approval_line wait_status sandbox_in sandbox_out
+
+    rm -rf "$case_dir"
+    mkdir -p "$case_dir"
+    write_project_config "$case_dir" "deny-all"
+
+    coproc SANDBOX { HOME="$TEST_ROOT/home" "$PI_SANDBOX_BIN" tool bash --fs write --net restricted --cwd "$case_dir" --session "$SESSION_ID" --approval external 2>"$stderr_file"; }
+    sandbox_in="${SANDBOX[1]}"
+    sandbox_out="${SANDBOX[0]}"
+
+    printf '%s\n' '{"type":"start","payload":{"command":"curl -fsS --max-time 30 https://google.com >/dev/null","timeout":30}}' >&"$sandbox_in"
+
+    if ! IFS= read -r approval_line <&"$sandbox_out"; then
+        fail "$label" "expected approval_request frame"
+        eval "exec ${sandbox_in}>&-"
+        wait "$SANDBOX_PID" 2>/dev/null || true
+        return
+    fi
+
+    eval "exec ${sandbox_in}>&-"
+    wait "$SANDBOX_PID"
+    wait_status=$?
+
+    if [[ $wait_status -ne 0 ]]; then
+        pass "$label"
+    else
+        fail "$label" "expected nonzero exit after stdin close\napproval=$approval_line"
+    fi
+}
+
+run_combo() {
+    local fs="$1"
+    local net="$2"
+    local case_dir="$TEST_ROOT/work/${fs}-${net}"
+
+    rm -rf "$case_dir"
+    mkdir -p "$case_dir"
+    printf 'seed-data-%s-%s\n' "$fs" "$net" >"$case_dir/input.txt"
+    write_project_config "$case_dir" "deny-all"
+
+    printf '\n%s== %s / %s ==%s\n' "$BOLD" "$fs" "$net" "$RESET"
+
+    run_tool_read_test "$fs" "$net" "$case_dir"
+    run_tool_write_test "$fs" "$net" "$case_dir"
+    run_cmd_read_test "$fs" "$net" "$case_dir"
+    run_cmd_write_test "$fs" "$net" "$case_dir"
+
+    case "$net" in
+    none)
+        run_network_test "$fs" "$net" "$case_dir" "deny-all" "no"
+        ;;
+    restricted)
+        run_network_test "$fs" "$net" "$case_dir" "deny-all" "no"
+        run_network_test "$fs" "$net" "$case_dir" "allow-google" "yes"
+        ;;
+    unrestricted)
+        run_network_test "$fs" "$net" "$case_dir" "deny-all" "yes"
+        ;;
+    esac
+}
+
+main() {
+    need_cmd bwrap
+    need_cmd sh
+    ensure_binary "${1:-}"
+
+    TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/pi-sandbox-test.XXXXXX")"
+    mkdir -p "$TEST_ROOT/home"
+
+    printf '%sUsing pi-sandbox:%s %s\n' "$BLUE" "$RESET" "$PI_SANDBOX_BIN"
+    printf '%sTemp root:%s %s\n' "$BLUE" "$RESET" "$TEST_ROOT"
+
+    local fs net
+    for fs in readonly write unrestricted; do
+        for net in none restricted unrestricted; do
+            run_combo "$fs" "$net"
+        done
+    done
+
+    printf '\n%s== external approval ==%s\n' "$BOLD" "$RESET"
+    run_tool_bash_external_jsonl_test
+    run_tool_bash_external_stdin_close_test
+
+    printf '\n%sSummary%s\n' "$BOLD" "$RESET"
+    printf '  %sPASS%s: %d\n' "$GREEN" "$RESET" "$PASS_COUNT"
+    printf '  %sFAIL%s: %d\n' "$RED" "$RESET" "$FAIL_COUNT"
+
+    if [[ $FAIL_COUNT -ne 0 ]]; then
+        exit 1
+    fi
+}
+
+main "$@"
