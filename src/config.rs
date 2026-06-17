@@ -31,7 +31,7 @@ struct NetworkProxyConfig {
     pub allow: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "allowLocal", skip_serializing_if = "Option::is_none")]
     pub allow_local: Option<bool>,
 }
 
@@ -265,6 +265,14 @@ async fn set_mode(path: &Path, mode: u32) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn temp_home(label: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("pi-sandbox-config-{label}-{nonce}"))
+    }
+
     #[test]
     fn reads_new_top_level_config_shape() {
         let config = serde_json::from_str::<SandboxConfigFile>(
@@ -291,5 +299,66 @@ mod tests {
             Some(vec!["example.com".to_string()])
         );
         assert_eq!(config.network_proxy.allow_local, Some(false));
+    }
+
+    #[test]
+    fn reads_camel_case_allow_local() {
+        let config = serde_json::from_str::<SandboxConfigFile>(
+            r#"{
+                "network_proxy": {
+                    "allowLocal": true
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.network_proxy.allow_local, Some(true));
+    }
+
+    #[tokio::test]
+    async fn resolves_global_and_project_defaults() {
+        let home = temp_home("defaults");
+        let project = home.join("project");
+        std::fs::create_dir_all(home.join(".pi/agent")).unwrap();
+        std::fs::create_dir_all(project.join(".pi")).unwrap();
+        std::fs::write(
+            home.join(".pi/agent/sandbox.json"),
+            r#"{
+                "fs": "readonly",
+                "net": "none",
+                "network_proxy": {
+                    "allow": ["global.example.com"],
+                    "allowLocal": true
+                }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            project.join(".pi/sandbox.json"),
+            r#"{
+                "fs": "write",
+                "net": "restricted",
+                "network_proxy": {
+                    "allow": ["project.example.com"],
+                    "deny": ["blocked.example.com"]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let old_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
+        let config = load_effective_config(&project).await.unwrap();
+        match old_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+
+        assert_eq!(config.fs, Some(FsMode::Write));
+        assert_eq!(config.net, Some(NetMode::Restricted));
+        assert_eq!(config.allow, vec!["project.example.com".to_string()]);
+        assert_eq!(config.deny, vec!["blocked.example.com".to_string()]);
+        assert!(config.allow_local);
+        let _ = std::fs::remove_dir_all(home);
     }
 }

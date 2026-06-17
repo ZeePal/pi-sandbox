@@ -1,0 +1,70 @@
+diff --git a/codex-rs/linux-sandbox/src/landlock.rs b/codex-rs/linux-sandbox/src/landlock.rs
+index 65ba3eb..f6dff5f 100644
+--- a/codex-rs/linux-sandbox/src/landlock.rs
++++ b/codex-rs/linux-sandbox/src/landlock.rs
+@@ -185,23 +185,12 @@ fn install_network_seccomp_filter_on_current_thread(
+ 
+     match mode {
+         NetworkSeccompMode::Restricted => {
+-            deny_syscall(&mut rules, libc::SYS_connect);
+-            deny_syscall(&mut rules, libc::SYS_accept);
+-            deny_syscall(&mut rules, libc::SYS_accept4);
+-            deny_syscall(&mut rules, libc::SYS_bind);
+-            deny_syscall(&mut rules, libc::SYS_listen);
+-            deny_syscall(&mut rules, libc::SYS_getpeername);
+-            deny_syscall(&mut rules, libc::SYS_getsockname);
+-            deny_syscall(&mut rules, libc::SYS_shutdown);
++            // Allow AF_UNIX listener sockets for local-only IPC such as Terraform
++            // provider plugins. Network egress remains blocked because socket()
++            // below still denies every non-AF_UNIX socket family.
+             deny_syscall(&mut rules, libc::SYS_sendto);
+             deny_syscall(&mut rules, libc::SYS_sendmmsg);
+-            // NOTE: allowing recvfrom allows some tools like: `cargo clippy`
+-            // to run with their socketpair + child processes for sub-proc
+-            // management.
+-            // deny_syscall(&mut rules, libc::SYS_recvfrom);
+             deny_syscall(&mut rules, libc::SYS_recvmmsg);
+-            deny_syscall(&mut rules, libc::SYS_getsockopt);
+-            deny_syscall(&mut rules, libc::SYS_setsockopt);
+ 
+             // For `socket` we allow AF_UNIX (arg0 == AF_UNIX) and deny
+             // everything else.
+@@ -217,12 +206,10 @@ fn install_network_seccomp_filter_on_current_thread(
+         }
+         NetworkSeccompMode::ProxyRouted => {
+             // In proxy-routed mode we allow IP sockets in the isolated
+-            // namespace (used to reach the local TCP bridge) but deny socket()
+-            // for all other families, including AF_UNIX. Only AF_UNIX
+-            // socketpair() remains available for process-local IPC because it
+-            // cannot connect to a socket outside the sandbox or bypass the
+-            // bridge.
+-            let deny_non_ip_socket = SeccompRule::new(vec![
++            // namespace (used to reach the local TCP bridge) and AF_UNIX sockets
++            // for local-only IPC such as Terraform provider plugins. Other socket
++            // families remain denied.
++            let deny_non_ip_or_unix_socket = SeccompRule::new(vec![
+                 SeccompCondition::new(
+                     0,
+                     SeccompCmpArgLen::Dword,
+@@ -235,6 +222,12 @@ fn install_network_seccomp_filter_on_current_thread(
+                     SeccompCmpOp::Ne,
+                     libc::AF_INET6 as u64,
+                 )?,
++                SeccompCondition::new(
++                    0,
++                    SeccompCmpArgLen::Dword,
++                    SeccompCmpOp::Ne,
++                    libc::AF_UNIX as u64,
++                )?,
+             ])?;
+             let deny_non_unix_socketpair = SeccompRule::new(vec![SeccompCondition::new(
+                 0,
+@@ -242,7 +235,7 @@ fn install_network_seccomp_filter_on_current_thread(
+                 SeccompCmpOp::Ne,
+                 libc::AF_UNIX as u64,
+             )?])?;
+-            rules.insert(libc::SYS_socket, vec![deny_non_ip_socket]);
++            rules.insert(libc::SYS_socket, vec![deny_non_ip_or_unix_socket]);
+             rules.insert(libc::SYS_socketpair, vec![deny_non_unix_socketpair]);
+         }
+     }

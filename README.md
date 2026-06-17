@@ -7,10 +7,34 @@ Requirements:
 - `bwrap` (bubblewrap) on `PATH`
 - `fd` and `rg` on `PATH` for `find` / `grep`
 
+This repo builds against a local, ignored checkout of OpenAI Codex under
+`vendor/openai/codex`. The checkout is created from the pinned stable Codex tag
+and patched to allow local Unix sockets in network-sandboxed modes. This keeps
+Terraform provider plugin IPC working while preserving network egress controls.
+
+Prepare the Codex vendor checkout before building:
+```bash
+scripts/prepare_codex_vendor
+```
+
 Build and install:
 ```bash
 cargo install --locked --path .
 ln -s "$PWD/pi-extension/index.ts" ~/.pi/agent/extensions/pi-sandbox.ts
+```
+
+For local verification:
+```bash
+scripts/prepare_codex_vendor
+cargo test
+scripts/run_tests debug
+```
+
+To refresh the Codex checkout after changing the patch or tag:
+```bash
+rm -rf vendor/openai/codex
+scripts/prepare_codex_vendor
+cargo update -p codex-sandboxing -p codex-linux-sandbox -p codex-network-proxy -p codex-protocol
 ```
 
 ## Configure

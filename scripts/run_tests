@@ -87,6 +87,8 @@ write_project_config() {
     local allow_block='[]'
     if [[ "$restricted_allow_mode" == "allow-google" ]]; then
         allow_block='["google.com"]'
+    elif [[ "$restricted_allow_mode" == "allow-terraform-google-provider" ]]; then
+        allow_block='["registry.terraform.io", "releases.hashicorp.com", "*.googleapis.com", "googleapis.com"]'
     fi
 
     cat >"$case_dir/.pi/sandbox.json" <<EOF
@@ -354,6 +356,89 @@ run_tool_bash_external_stdin_close_test() {
     fi
 }
 
+setup_terraform_google_provider_case() {
+    local case_dir="$1"
+
+    rm -rf "$case_dir"
+    mkdir -p "$case_dir"
+    write_project_config "$case_dir" "allow-terraform-google-provider"
+
+    cat >"$case_dir/main.tf" <<'EOF'
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 6.0"
+    }
+  }
+}
+
+provider "google" {
+  project = "pi-sandbox-validation"
+  region  = "us-central1"
+}
+EOF
+}
+
+terraform_validate_in_sandbox() {
+    local case_dir="$1"
+    local net="$2"
+    local stderr_file="$3"
+
+    HOME="$TEST_ROOT/home" TF_IN_AUTOMATION=1 \
+        "$PI_SANDBOX_BIN" run --fs write --net "$net" --cwd "$case_dir" \
+        --session "$SESSION_ID" --approval deny -- \
+        terraform validate -no-color 2>>"$stderr_file"
+}
+
+run_terraform_google_provider_tests() {
+    local case_dir="$TEST_ROOT/work/terraform-google-provider"
+    local init_label="terraform google provider init [write/restricted]"
+    local restricted_label="terraform google provider validate [write/restricted]"
+    local none_label="terraform google provider validate [write/none]"
+    local stderr_file="$TEST_ROOT/stderr-terraform-google-provider.log"
+    local stdout status
+
+    if ! command -v terraform >/dev/null 2>&1; then
+        pass "$init_label (skipped: terraform not installed)"
+        pass "$restricted_label (skipped: terraform not installed)"
+        pass "$none_label (skipped: terraform not installed)"
+        return
+    fi
+
+    setup_terraform_google_provider_case "$case_dir"
+
+    stdout="$(
+        HOME="$TEST_ROOT/home" TF_IN_AUTOMATION=1 \
+            "$PI_SANDBOX_BIN" run --fs write --net restricted --cwd "$case_dir" \
+            --session "$SESSION_ID" --approval deny -- \
+            terraform init -input=false -no-color 2>"$stderr_file"
+    )"
+    status=$?
+    if [[ $status -eq 0 ]]; then
+        pass "$init_label"
+    else
+        fail "$init_label" "exit=$status\nstderr=$(cat "$stderr_file")\nstdout=$stdout"
+        return
+    fi
+
+    stdout="$(terraform_validate_in_sandbox "$case_dir" restricted "$stderr_file")"
+    status=$?
+    if [[ $status -eq 0 ]]; then
+        pass "$restricted_label"
+    else
+        fail "$restricted_label" "exit=$status\nstderr=$(cat "$stderr_file")\nstdout=$stdout"
+    fi
+
+    stdout="$(terraform_validate_in_sandbox "$case_dir" none "$stderr_file")"
+    status=$?
+    if [[ $status -eq 0 ]]; then
+        pass "$none_label"
+    else
+        fail "$none_label" "exit=$status\nstderr=$(cat "$stderr_file")\nstdout=$stdout"
+    fi
+}
+
 run_combo() {
     local fs="$1"
     local net="$2"
@@ -406,6 +491,9 @@ main() {
     printf '\n%s== external approval ==%s\n' "$BOLD" "$RESET"
     run_tool_bash_external_jsonl_test
     run_tool_bash_external_stdin_close_test
+
+    printf '\n%s== terraform ==%s\n' "$BOLD" "$RESET"
+    run_terraform_google_provider_tests
 
     printf '\n%sSummary%s\n' "$BOLD" "$RESET"
     printf '  %sPASS%s: %d\n' "$GREEN" "$RESET" "$PASS_COUNT"

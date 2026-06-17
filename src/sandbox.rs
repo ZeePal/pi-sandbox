@@ -7,11 +7,12 @@ use crate::internal_tools::{dispatch_internal_tool, tool_error_json, InternalToo
 use crate::text::{truncate_tail_text, MAX_TOOL_TEXT_BYTES, MAX_TOOL_TEXT_LINES};
 use crate::types::{ApprovalMode, FsMode, NetMode, PolicyAction, PolicyScope, RuntimeOptions};
 use anyhow::{anyhow, bail, Context, Result};
+#[cfg(test)]
 use async_trait::async_trait;
 use codex_network_proxy::{
-    build_config_state, ConfigReloader, ConfigState, NetworkDecision, NetworkPolicyDecider,
-    NetworkPolicyRequest, NetworkProtocol, NetworkProxy, NetworkProxyConfig,
-    NetworkProxyConstraints, NetworkProxyState, PROXY_ENV_KEYS,
+    build_config_state, ConfigReloader, ConfigReloaderFuture, ConfigState, NetworkDecision,
+    NetworkPolicyDecider, NetworkPolicyDeciderFuture, NetworkPolicyRequest, NetworkProtocol,
+    NetworkProxy, NetworkProxyConfig, NetworkProxyConstraints, NetworkProxyState, PROXY_ENV_KEYS,
 };
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::permissions::{
@@ -54,18 +55,17 @@ struct CommandCapture {
 
 struct NoopReloader;
 
-#[async_trait]
 impl ConfigReloader for NoopReloader {
     fn source_label(&self) -> String {
         "pi-sandbox static config".to_string()
     }
 
-    async fn maybe_reload(&self) -> Result<Option<ConfigState>> {
-        Ok(None)
+    fn maybe_reload(&self) -> ConfigReloaderFuture<'_, Option<ConfigState>> {
+        Box::pin(async { Ok(None) })
     }
 
-    async fn reload_now(&self) -> Result<ConfigState> {
-        Err(anyhow!("reload is not supported"))
+    fn reload_now(&self) -> ConfigReloaderFuture<'_, ConfigState> {
+        Box::pin(async { Err(anyhow!("reload is not supported")) })
     }
 }
 
@@ -223,19 +223,20 @@ impl ApprovalManager {
     }
 }
 
-#[async_trait]
 impl NetworkPolicyDecider for ApprovalManager {
-    async fn decide(&self, request: NetworkPolicyRequest) -> NetworkDecision {
-        match self.decide_request(request).await {
-            Ok(ApprovalDecision::AllowOnce)
-            | Ok(ApprovalDecision::AllowForSession)
-            | Ok(ApprovalDecision::AlwaysAllow) => NetworkDecision::Allow,
-            Ok(ApprovalDecision::Deny) => NetworkDecision::deny("not_allowed"),
-            Err(err) => {
-                eprintln!("network approval flow failed: {err:#}");
-                NetworkDecision::deny("approval_runtime_error")
+    fn decide(&self, request: NetworkPolicyRequest) -> NetworkPolicyDeciderFuture<'_> {
+        Box::pin(async move {
+            match self.decide_request(request).await {
+                Ok(ApprovalDecision::AllowOnce)
+                | Ok(ApprovalDecision::AllowForSession)
+                | Ok(ApprovalDecision::AlwaysAllow) => NetworkDecision::Allow,
+                Ok(ApprovalDecision::Deny) => NetworkDecision::deny("not_allowed"),
+                Err(err) => {
+                    eprintln!("network approval flow failed: {err:#}");
+                    NetworkDecision::deny("approval_runtime_error")
+                }
             }
-        }
+        })
     }
 }
 
