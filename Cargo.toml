@@ -21,7 +21,13 @@ tokio = { version = "1", features = [
   "time",
 ] }
 
+# Codex crates are vendored from upstream OpenAI Codex by scripts/prepare_codex_vendor.
 codex-sandboxing = { path = "vendor/openai/codex/codex-rs/sandboxing", package = "codex-sandboxing" }
 codex-linux-sandbox = { path = "vendor/openai/codex/codex-rs/linux-sandbox", package = "codex-linux-sandbox" }
 codex-network-proxy = { path = "vendor/openai/codex/codex-rs/network-proxy", package = "codex-network-proxy" }
 codex-protocol = { path = "vendor/openai/codex/codex-rs/protocol", package = "codex-protocol" }
+
+[patch.crates-io]
+# Mirrors upstream Codex workspace patches needed by the vendored Codex crates.
+tokio-tungstenite = { git = "https://github.com/openai-oss-forks/tokio-tungstenite", rev = "0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186" }
+tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }

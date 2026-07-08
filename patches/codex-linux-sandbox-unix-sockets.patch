@@ -1,7 +1,16 @@
 diff --git a/codex-rs/linux-sandbox/src/landlock.rs b/codex-rs/linux-sandbox/src/landlock.rs
-index 65ba3eb..f6dff5f 100644
+index 65ba3eb..5f4c048 100644
 --- a/codex-rs/linux-sandbox/src/landlock.rs
 +++ b/codex-rs/linux-sandbox/src/landlock.rs
+@@ -147,7 +147,7 @@ fn install_filesystem_landlock_rules_on_current_thread(
+         .create()?
+         .add_rules(landlock::path_beneath_rules(&["/"], access_ro))?
+         .add_rules(landlock::path_beneath_rules(&["/dev/null"], access_rw))?
+-        .set_no_new_privs(true);
++        .no_new_privs(true);
+ 
+     if !writable_roots.is_empty() {
+         ruleset = ruleset.add_rules(landlock::path_beneath_rules(&writable_roots, access_rw))?;
 @@ -185,23 +185,12 @@ fn install_network_seccomp_filter_on_current_thread(
  
      match mode {

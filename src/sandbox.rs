@@ -868,10 +868,12 @@ mod tests {
             protocol,
             host: host.to_string(),
             port,
+            environment_id: None,
             client_addr: None,
             method: None,
             command: None,
             exec_policy_hint: None,
+            execution_id: None,
         }
     }
 
