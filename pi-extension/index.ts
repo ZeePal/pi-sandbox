@@ -210,7 +210,14 @@ function approvalChoiceToDecision(choice: ApprovalChoice): ApprovalDecision {
     }
 }
 
+function assertSandboxSuccess(result: any): void {
+    if (result?.ok !== false) return;
+    const message = result?.error?.message || result?.text || "pi-sandbox tool failed";
+    throw new Error(String(message));
+}
+
 function makeReadResult(result: any) {
+    assertSandboxSuccess(result);
     return {
         content: [{ type: "text", text: result.text }],
         details: result.truncated
@@ -226,6 +233,7 @@ function makeReadResult(result: any) {
 }
 
 function makeTextResult(result: any) {
+    assertSandboxSuccess(result);
     return {
         content: [{ type: "text", text: result.text }],
         details: result.truncated ? { truncation: { truncated: true } } : undefined,
@@ -524,6 +532,7 @@ export default function (pi: ExtensionAPI) {
                 return originals.write.execute(id, params, signal, onUpdate, ctx);
             }
             const result = await resolveToolCall("write", params, ctx, signal);
+            assertSandboxSuccess(result);
             return {
                 content: [{ type: "text", text: `Successfully wrote ${result.bytesWritten} bytes to ${params.path}` }],
                 details: undefined,
@@ -538,6 +547,7 @@ export default function (pi: ExtensionAPI) {
                 return originals.edit.execute(id, params, signal, onUpdate, ctx);
             }
             const result = await resolveToolCall("edit", params, ctx, signal);
+            assertSandboxSuccess(result);
             return {
                 content: [{ type: "text", text: `Successfully replaced ${result.applied} block(s) in ${params.path}.` }],
                 details: undefined,
@@ -582,6 +592,7 @@ export default function (pi: ExtensionAPI) {
                 return originals.bash.execute(id, params, signal, onUpdate, ctx);
             }
             const result = await resolveToolCall("bash", params, ctx, signal);
+            assertSandboxSuccess(result);
             const output = combineBashOutput(result);
             if (result.timedOut) {
                 throw new Error(`${output}\n\nCommand timed out`);

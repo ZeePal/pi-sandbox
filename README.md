@@ -27,7 +27,7 @@ For local verification:
 ```bash
 scripts/prepare_codex_vendor
 cargo test
-scripts/run_tests debug
+scripts/run_smoke_tests debug
 ```
 
 To refresh the Codex checkout after changing the patch or tag:

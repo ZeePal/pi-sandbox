@@ -400,3 +400,120 @@ fn apply_exact_edits(original: &str, edits: &[ReplaceEditInput]) -> Result<Strin
     result.push_str(&original[cursor..]);
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_test_dir() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after UNIX_EPOCH")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("pi-sandbox-internal-tools-{nanos}"));
+        std::fs::create_dir_all(&path).expect("temp test directory must be creatable");
+        path
+    }
+
+    fn assert_error_schema(value: &Value) {
+        assert_eq!(value.get("ok").and_then(Value::as_bool), Some(false));
+        assert!(
+            value.get("text").is_none(),
+            "error wrappers must not provide fake tool text"
+        );
+
+        let error = value
+            .get("error")
+            .and_then(Value::as_object)
+            .expect("error response must include an error object");
+        assert_eq!(
+            error.get("kind").and_then(Value::as_str),
+            Some("tool_error")
+        );
+        assert!(error.get("message").and_then(Value::as_str).is_some());
+    }
+
+    fn assert_text_success_schema(value: &Value) {
+        assert_eq!(value.get("ok").and_then(Value::as_bool), Some(true));
+        assert!(value.get("text").and_then(Value::as_str).is_some());
+        assert!(value.get("truncated").and_then(Value::as_bool).is_some());
+    }
+
+    #[test]
+    fn tool_error_json_keeps_error_text_only_in_error_object() {
+        let value = tool_error_json("example failure");
+
+        assert_error_schema(&value);
+        assert_eq!(value["error"]["message"], "example failure");
+    }
+
+    #[test]
+    fn read_nonexistent_file_returns_complete_error_schema() {
+        let cwd = temp_test_dir();
+        let value = dispatch_internal_tool(
+            InternalToolName::Read,
+            r#"{"path":"does-not-exist.txt"}"#,
+            &cwd,
+        );
+
+        assert_error_schema(&value);
+        assert!(value["error"]["message"]
+            .as_str()
+            .expect("error message must be a string")
+            .contains("failed to read"));
+    }
+
+    #[test]
+    fn malformed_payload_errors_use_complete_schema_for_every_internal_tool() {
+        let cwd = temp_test_dir();
+        let tools = [
+            InternalToolName::Read,
+            InternalToolName::Write,
+            InternalToolName::Edit,
+            InternalToolName::Ls,
+            InternalToolName::Find,
+            InternalToolName::Grep,
+        ];
+
+        for tool in tools {
+            let value = dispatch_internal_tool(tool, "not-json", &cwd);
+            assert_error_schema(&value);
+        }
+    }
+
+    #[test]
+    fn text_output_successes_use_expected_schema() {
+        let cwd = temp_test_dir();
+        let file_path = cwd.join("sample.txt");
+        std::fs::write(&file_path, "alpha\nbeta\n").expect("sample file must be writable");
+
+        let read_value = dispatch_internal_tool(
+            InternalToolName::Read,
+            r#"{"path":"sample.txt","limit":1}"#,
+            &cwd,
+        );
+        assert_text_success_schema(&read_value);
+        assert!(read_value
+            .get("lineCount")
+            .and_then(Value::as_u64)
+            .is_some());
+
+        let ls_value = dispatch_internal_tool(InternalToolName::Ls, r#"{"path":"."}"#, &cwd);
+        assert_text_success_schema(&ls_value);
+
+        let find_value = dispatch_internal_tool(
+            InternalToolName::Find,
+            r#"{"pattern":"sample.txt","path":"."}"#,
+            &cwd,
+        );
+        assert_text_success_schema(&find_value);
+
+        let grep_value = dispatch_internal_tool(
+            InternalToolName::Grep,
+            r#"{"pattern":"alpha","path":"sample.txt"}"#,
+            &cwd,
+        );
+        assert_text_success_schema(&grep_value);
+    }
+}
