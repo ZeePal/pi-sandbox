@@ -25,6 +25,7 @@ type SandboxState = {
     net: NetMode;
     sessionKey: string;
     outerSandbox: boolean;
+    projectSandboxTrusted: boolean;
 };
 
 type ApprovalRequestFrame = {
@@ -81,11 +82,16 @@ async function readJson(path: string): Promise<any | null> {
     }
 }
 
-async function loadConfigDefaults(cwd: string): Promise<{ fs?: FsMode; net?: NetMode }> {
-    const userPath = join(homedir(), ".pi", "agent", "sandbox.json");
-    const projectPath = join(cwd, ".pi", "sandbox.json");
-    const user = (await readJson(userPath)) || {};
-    const project = (await readJson(projectPath)) || {};
+async function loadConfigDefaults(cwd: string, allowProject: boolean): Promise<{ fs?: FsMode; net?: NetMode }> {
+    const user = ((await readJson(join(homedir(), ".pi", "agent", "settings.json"))) || {})?.ZeePal?.sandbox || {};
+    if (!allowProject) {
+        return {
+            fs: user?.fs ?? undefined,
+            net: user?.net ?? undefined,
+        };
+    }
+
+    const project = ((await readJson(join(cwd, ".pi", "settings.json"))) || {})?.ZeePal?.sandbox || {};
     return {
         fs: project?.fs ?? user?.fs ?? undefined,
         net: project?.net ?? user?.net ?? undefined,
@@ -134,30 +140,11 @@ function updateStatus(ctx: ExtensionContext, state: SandboxState) {
     ctx.ui.setStatus("pi-sandbox", footerLabel(state));
 }
 
-async function runPiSandbox(
-    args: string[],
-    input: string,
-    signal?: AbortSignal,
-): Promise<{ stdout: string; stderr: string; code: number | null }> {
-    return new Promise((resolve, reject) => {
-        const child = spawn(PI_SANDBOX_BIN, args, { stdio: ["pipe", "pipe", "pipe"] });
-        const stdout: Buffer[] = [];
-        const stderr: Buffer[] = [];
-        child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
-        child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
-        child.on("error", reject);
-        const onAbort = () => child.kill("SIGTERM");
-        signal?.addEventListener("abort", onAbort, { once: true });
-        child.on("close", (code) => {
-            signal?.removeEventListener("abort", onAbort);
-            resolve({
-                stdout: Buffer.concat(stdout).toString("utf8"),
-                stderr: Buffer.concat(stderr).toString("utf8"),
-                code,
-            });
-        });
-        child.stdin.end(input);
-    });
+function sandboxEnv(state: SandboxState): NodeJS.ProcessEnv {
+    return {
+        ...process.env,
+        PI_SANDBOX_PROJECT_SETTINGS_TRUSTED: state.projectSandboxTrusted ? "1" : "0",
+    };
 }
 
 function toolArgs(toolName: string, ctx: ExtensionContext, state: SandboxState): string[] {
@@ -262,6 +249,7 @@ export default function (pi: ExtensionAPI) {
         net: "none",
         sessionKey: randomUUID(),
         outerSandbox: process.env.AGENTWRAP_SANDBOX === "true",
+        projectSandboxTrusted: false,
     };
 
     function approvalEventPayload(
@@ -324,6 +312,7 @@ export default function (pi: ExtensionAPI) {
         return new Promise((resolve, reject) => {
             const child = spawn(PI_SANDBOX_BIN, toolArgs(toolName, ctx, state), {
                 stdio: ["pipe", "pipe", "pipe"],
+                env: sandboxEnv(state),
             });
             const stderr: Buffer[] = [];
             const localApprovalIds = new Set<string>();
@@ -459,7 +448,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     pi.on("session_start", async (_event, ctx) => {
-        const defaults = await loadConfigDefaults(ctx.cwd);
+        state.projectSandboxTrusted = ctx.isProjectTrusted();
+        const defaults = await loadConfigDefaults(ctx.cwd, state.projectSandboxTrusted);
         state.sessionKey = deriveSessionKey(ctx);
         state.fs = defaults.fs ?? deriveDefaultFs(pi);
         state.net = defaults.net ?? "none";

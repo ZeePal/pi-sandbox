@@ -2,9 +2,6 @@
 /target/
 /vendor/
 
-# Pi local state
-/.pi/
-
 # JS / TS local deps or build output
 node_modules/
 dist/

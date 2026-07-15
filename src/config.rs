@@ -16,6 +16,18 @@ pub(crate) struct SessionPolicyFile {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SandboxSettingsFile {
+    #[serde(default, rename = "ZeePal")]
+    pub zee_pal: ZeePalSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ZeePalSettings {
+    #[serde(default)]
+    pub sandbox: SandboxConfigFile,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct SandboxConfigFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fs: Option<FsMode>,
@@ -51,10 +63,12 @@ pub struct EffectiveConfig {
 }
 
 pub async fn load_effective_config(cwd: &Path) -> Result<EffectiveConfig> {
-    let user_path = user_config_path()?;
-    let project_path = project_config_path(cwd);
-    let user = load_config_file(&user_path).await?;
-    let project = load_config_file(&project_path).await?;
+    let user = load_settings_sandbox(&user_settings_path()?).await?;
+    let project = if project_settings_trusted() {
+        load_settings_sandbox(&project_settings_path(cwd)).await?
+    } else {
+        SandboxConfigFile::default()
+    };
 
     let allow = project
         .network_proxy
@@ -101,11 +115,11 @@ pub async fn set_policy(
         }
         PolicyScope::Persistent => {
             let path = auto_persistent_policy_path(cwd)?;
-            let mut cfg = load_config_file(&path).await?;
-            let allow = cfg.network_proxy.allow.get_or_insert_with(Vec::new);
-            let deny = cfg.network_proxy.deny.get_or_insert_with(Vec::new);
+            let mut settings = load_settings_file(&path).await?;
+            let allow = settings.zee_pal.sandbox.network_proxy.allow.get_or_insert_with(Vec::new);
+            let deny = settings.zee_pal.sandbox.network_proxy.deny.get_or_insert_with(Vec::new);
             update_policy_lists(allow, deny, action, host);
-            save_config_file(&path, &cfg).await
+            save_settings_file(&path, &settings).await
         }
     }
 }
@@ -120,16 +134,20 @@ pub(crate) async fn load_session_policy(session: &str) -> Result<SessionPolicyFi
     }
 }
 
-async fn load_config_file(path: &Path) -> Result<SandboxConfigFile> {
+async fn load_settings_sandbox(path: &Path) -> Result<SandboxConfigFile> {
+    Ok(load_settings_file(path).await?.zee_pal.sandbox)
+}
+
+async fn load_settings_file(path: &Path) -> Result<SandboxSettingsFile> {
     match fs::read_to_string(path).await {
-        Ok(content) => Ok(serde_json::from_str::<SandboxConfigFile>(&content)
-            .with_context(|| format!("invalid config JSON in {}", path.display()))?),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(SandboxConfigFile::default()),
+        Ok(content) => serde_json::from_str::<SandboxSettingsFile>(&content)
+            .with_context(|| format!("invalid settings JSON in {}", path.display())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(SandboxSettingsFile::default()),
         Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
     }
 }
 
-async fn save_config_file(path: &Path, config: &SandboxConfigFile) -> Result<()> {
+async fn save_settings_file(path: &Path, settings: &SandboxSettingsFile) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .await
@@ -137,7 +155,7 @@ async fn save_config_file(path: &Path, config: &SandboxConfigFile) -> Result<()>
         set_mode(parent, 0o700).await?;
     }
 
-    let content = serde_json::to_string_pretty(config)? + "\n";
+    let content = serde_json::to_string_pretty(settings)? + "\n";
     fs::write(path, content)
         .await
         .with_context(|| format!("failed to write {}", path.display()))?;
@@ -161,8 +179,18 @@ async fn save_session_policy(session: &str, policy: &SessionPolicyFile) -> Resul
     Ok(())
 }
 
-fn user_config_path() -> Result<PathBuf> {
-    Ok(agent_dir()?.join("sandbox.json"))
+fn project_settings_trusted() -> bool {
+    std::env::var("PI_SANDBOX_PROJECT_SETTINGS_TRUSTED")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn user_settings_path() -> Result<PathBuf> {
+    Ok(agent_dir()?.join("settings.json"))
+}
+
+fn project_settings_path(cwd: &Path) -> PathBuf {
+    discover_project_root(cwd).join(".pi").join("settings.json")
 }
 
 fn session_policy_dir() -> Result<PathBuf> {
@@ -188,19 +216,15 @@ fn agent_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".pi").join("agent"))
 }
 
-fn project_config_path(cwd: &Path) -> PathBuf {
-    discover_project_root(cwd).join(".pi").join("sandbox.json")
-}
-
 fn auto_persistent_policy_path(cwd: &Path) -> Result<PathBuf> {
     let project_root = discover_project_root(cwd);
     let has_project_marker = project_root.join(".git").exists()
         || project_root.join(".pi").exists()
         || project_root != cwd;
     if has_project_marker {
-        Ok(project_root.join(".pi").join("sandbox.json"))
+        Ok(project_root.join(".pi").join("settings.json"))
     } else {
-        user_config_path()
+        user_settings_path()
     }
 }
 
@@ -322,36 +346,50 @@ mod tests {
         std::fs::create_dir_all(home.join(".pi/agent")).unwrap();
         std::fs::create_dir_all(project.join(".pi")).unwrap();
         std::fs::write(
-            home.join(".pi/agent/sandbox.json"),
+            home.join(".pi/agent/settings.json"),
             r#"{
-                "fs": "readonly",
-                "net": "none",
-                "network_proxy": {
-                    "allow": ["global.example.com"],
-                    "allowLocal": true
+                "ZeePal": {
+                    "sandbox": {
+                        "fs": "readonly",
+                        "net": "none",
+                        "network_proxy": {
+                            "allow": ["global.example.com"],
+                            "allowLocal": true
+                        }
+                    }
                 }
             }"#,
         )
         .unwrap();
         std::fs::write(
-            project.join(".pi/sandbox.json"),
+            project.join(".pi/settings.json"),
             r#"{
-                "fs": "write",
-                "net": "restricted",
-                "network_proxy": {
-                    "allow": ["project.example.com"],
-                    "deny": ["blocked.example.com"]
+                "ZeePal": {
+                    "sandbox": {
+                        "fs": "write",
+                        "net": "restricted",
+                        "network_proxy": {
+                            "allow": ["project.example.com"],
+                            "deny": ["blocked.example.com"]
+                        }
+                    }
                 }
             }"#,
         )
         .unwrap();
 
         let old_home = std::env::var_os("HOME");
+        let old_trust = std::env::var_os("PI_SANDBOX_PROJECT_SETTINGS_TRUSTED");
         std::env::set_var("HOME", &home);
+        std::env::set_var("PI_SANDBOX_PROJECT_SETTINGS_TRUSTED", "1");
         let config = load_effective_config(&project).await.unwrap();
         match old_home {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
+        }
+        match old_trust {
+            Some(value) => std::env::set_var("PI_SANDBOX_PROJECT_SETTINGS_TRUSTED", value),
+            None => std::env::remove_var("PI_SANDBOX_PROJECT_SETTINGS_TRUSTED"),
         }
 
         assert_eq!(config.fs, Some(FsMode::Write));

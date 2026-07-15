@@ -1,0 +1,8 @@
+{
+    "ZeePal": {
+        "sandbox": {
+            "fs": "unrestricted",
+            "net": "unrestricted"
+        }
+    }
+}
