@@ -573,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "codex-api"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "async-channel",
  "base64",
@@ -583,6 +583,7 @@ dependencies = [
  "codex-http-client",
  "codex-protocol",
  "codex-utils-rustls-provider",
+ "codex-websocket-client",
  "eventsource-stream",
  "futures",
  "http",
@@ -602,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "codex-async-utils"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "tokio",
  "tokio-util",
@@ -610,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "codex-client"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "codex-http-client",
  "eventsource-stream",
@@ -622,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "codex-execpolicy"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -636,8 +637,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-extension-items"
+version = "0.144.4"
+dependencies = [
+ "codex-utils-absolute-path",
+ "schemars 0.8.22",
+ "serde",
+ "ts-rs",
+]
+
+[[package]]
 name = "codex-http-client"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "bytes",
  "codex-utils-rustls-provider",
@@ -662,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "codex-install-context"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "codex-utils-absolute-path",
  "codex-utils-home-dir",
@@ -670,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "codex-linux-sandbox"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "clap",
  "codex-install-context",
@@ -691,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "codex-network-proxy"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -725,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "codex-otel"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "chrono",
  "codex-api",
@@ -755,19 +766,20 @@ dependencies = [
 
 [[package]]
 name = "codex-process-hardening"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "codex-protocol"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "chardetng",
  "chrono",
  "codex-async-utils",
  "codex-execpolicy",
+ "codex-extension-items",
  "codex-network-proxy",
  "codex-utils-absolute-path",
  "codex-utils-image",
@@ -799,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "codex-sandboxing"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "codex-network-proxy",
  "codex-protocol",
@@ -818,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-absolute-path"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "dirs",
  "dunce",
@@ -829,7 +841,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-cache"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "lru",
  "sha1",
@@ -838,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-home-dir"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "codex-utils-absolute-path",
  "dirs",
@@ -846,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-image"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "base64",
  "codex-utils-cache",
@@ -858,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-path-uri"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "base64",
  "codex-utils-absolute-path",
@@ -872,7 +884,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-pty"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "anyhow",
  "filedescriptor",
@@ -887,14 +899,14 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-rustls-provider"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "rustls",
 ]
 
 [[package]]
 name = "codex-utils-string"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "regex-lite",
  "serde",
@@ -902,8 +914,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-websocket-client"
+version = "0.144.4"
+dependencies = [
+ "codex-http-client",
+ "futures",
+ "rustls",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "url",
+]
+
+[[package]]
 name = "codex-windows-sandbox"
-version = "0.143.0"
+version = "0.144.4"
 dependencies = [
  "anyhow",
  "base64",

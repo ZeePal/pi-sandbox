@@ -346,7 +346,8 @@ async fn execute_command_capture(
 ) -> Result<CommandCapture> {
     ensure_bwrap_available()?;
 
-    let permission_profile = permission_profile(options.fs, options.net, &options.cwd);
+    let sandbox_policy_cwd = workspace_root_or_cwd(&options.cwd);
+    let permission_profile = permission_profile(options.fs, options.net, &sandbox_policy_cwd);
     let mut env = current_env_without_proxy();
     let mut proxy_runtime = None;
 
@@ -360,7 +361,7 @@ async fn execute_command_capture(
         command,
         &options.cwd,
         &permission_profile,
-        &options.cwd,
+        &sandbox_policy_cwd,
         false,
         allow_network_for_proxy(options.net == NetMode::Restricted),
     );
@@ -436,7 +437,8 @@ async fn execute_command_inherit(
 ) -> Result<i32> {
     ensure_bwrap_available()?;
 
-    let permission_profile = permission_profile(options.fs, options.net, &options.cwd);
+    let sandbox_policy_cwd = workspace_root_or_cwd(&options.cwd);
+    let permission_profile = permission_profile(options.fs, options.net, &sandbox_policy_cwd);
     let mut env = current_env_without_proxy();
     let mut proxy_runtime = None;
 
@@ -450,7 +452,7 @@ async fn execute_command_inherit(
         command,
         &options.cwd,
         &permission_profile,
-        &options.cwd,
+        &sandbox_policy_cwd,
         false,
         allow_network_for_proxy(options.net == NetMode::Restricted),
     );
@@ -768,6 +770,13 @@ fn permission_profile(fs_mode: FsMode, net_mode: NetMode, cwd: &Path) -> Permiss
     };
 
     PermissionProfile::from_runtime_permissions(&file_system, network)
+}
+
+fn workspace_root_or_cwd(cwd: &Path) -> PathBuf {
+    cwd.ancestors()
+        .find(|path| path.join(".git").exists())
+        .unwrap_or(cwd)
+        .to_path_buf()
 }
 
 fn current_env_without_proxy() -> HashMap<String, String> {

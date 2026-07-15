@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${CODEX_VENDOR_TAG:-rust-v0.143.0}"
+TAG="${CODEX_VENDOR_TAG:-rust-v0.144.4}"
 VENDOR_DIR="$ROOT_DIR/vendor/openai/codex"
 PATCH_FILE="$ROOT_DIR/patches/codex-linux-sandbox-unix-sockets.patch"
 
