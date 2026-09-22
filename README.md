@@ -38,27 +38,43 @@ cargo update -p codex-sandboxing -p codex-linux-sandbox -p codex-network-proxy -
 ```
 
 ## Configure
-Config can live in either of these files:
-- user: `~/.pi/agent/sandbox.json`
-- project: `<project>/.pi/sandbox.json`
+Sandbox config lives under `ZeePal.sandbox` in either settings file:
+- user: `~/.pi/agent/settings.json`
+- project: `<project>/.pi/settings.json`
 
-Project config overrides user config.
+Trusted project config overrides user config.
 
 Minimal example:
-```json
+```jsonc
 {
-  "fs": "write",               // write (default), readonly or unrestricted
-  "net": "none",               // none (default), restricted or unrestricted
-  "network_proxy": {
-    "allow": [                 // default: []
-        "github.com",
-        "*.github.com"
-    ],
-    "deny": ["example.com"],   // default: []
-    "allow_local": false       // default: false
+  "ZeePal": {
+    "sandbox": {
+      "fs": "write",               // write (default), readonly or unrestricted
+      "net": "none",               // none (default), restricted or unrestricted
+      "network_proxy": {
+        "allow": [                  // default: []
+          "github.com",
+          "*.github.com"
+        ],
+        "deny": ["example.com"],    // default: []
+        "allow_local": false        // default: false
+      }
+    }
   }
 }
 ```
+
+Startup flags override both settings files for the Pi process:
+```bash
+pi --sandbox-fs readonly --sandbox-net restricted
+```
+
+The flags accept the same canonical values as their equivalent config fields:
+- `--sandbox-fs`: `readonly`, `write`, or `unrestricted`
+- `--sandbox-net`: `none`, `restricted`, or `unrestricted`
+
+The aliases used by `/fs` and `/net` are also accepted: `r`, `w`, or `u` for
+filesystem mode; and `n`, `r`, `u`, `s`, or `sandboxed` for network mode.
 
 ## Architecture
 - See: [ARCHITECTURE.md](ARCHITECTURE.md)

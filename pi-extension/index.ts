@@ -112,6 +112,26 @@ function deriveDefaultFs(pi: ExtensionAPI): FsMode {
     return "write";
 }
 
+function parseFsMode(value: string | undefined): FsMode | undefined {
+    if (value === undefined) return undefined;
+    if (value === "readonly" || value === "r") return "readonly";
+    if (value === "write" || value === "w") return "write";
+    if (value === "unrestricted" || value === "u") return "unrestricted";
+    throw new Error(`Invalid --sandbox-fs value "${value}"; expected readonly|write|unrestricted (r|w|u)`);
+}
+
+function parseNetMode(value: string | undefined): NetMode | undefined {
+    if (value === undefined) return undefined;
+    if (value === "none" || value === "n") return "none";
+    if (value === "restricted" || value === "r") return "restricted";
+    if (value === "unrestricted" || value === "u" || value === "s" || value === "sandboxed") {
+        return "unrestricted";
+    }
+    throw new Error(
+        `Invalid --sandbox-net value "${value}"; expected none|restricted|unrestricted (n|r|u|s|sandboxed)`,
+    );
+}
+
 function directPassthroughMode(state: SandboxState): boolean {
     return state.fs === "unrestricted" && state.net === "unrestricted";
 }
@@ -233,6 +253,15 @@ function combineBashOutput(result: any): string {
 }
 
 export default function (pi: ExtensionAPI) {
+    pi.registerFlag("sandbox-fs", {
+        description: "Set pi-sandbox filesystem mode: readonly|write|unrestricted (r|w|u)",
+        type: "string",
+    });
+    pi.registerFlag("sandbox-net", {
+        description: "Set pi-sandbox network mode: none|restricted|unrestricted (n|r|u|s|sandboxed)",
+        type: "string",
+    });
+
     const cwd = process.cwd();
     const originals = {
         read: createReadTool(cwd),
@@ -451,8 +480,12 @@ export default function (pi: ExtensionAPI) {
         state.projectSandboxTrusted = ctx.isProjectTrusted();
         const defaults = await loadConfigDefaults(ctx.cwd, state.projectSandboxTrusted);
         state.sessionKey = deriveSessionKey(ctx);
-        state.fs = defaults.fs ?? deriveDefaultFs(pi);
-        state.net = defaults.net ?? "none";
+        state.fs = parseFsMode(pi.getFlag("sandbox-fs") as string | undefined)
+            ?? defaults.fs
+            ?? deriveDefaultFs(pi);
+        state.net = parseNetMode(pi.getFlag("sandbox-net") as string | undefined)
+            ?? defaults.net
+            ?? "none";
         state.outerSandbox = process.env.AGENTWRAP_SANDBOX === "true";
         pendingApprovals.clear();
         approvalPromptQueue.length = 0;
