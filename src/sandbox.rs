@@ -635,12 +635,10 @@ async fn start_managed_proxy(
     }
 
     let config: NetworkProxyConfig = serde_json::from_value(json!({
-        "network": {
-            "enabled": true,
-            "mode": "full",
-            "allow_local_binding": config.allow_local,
-            "domains": Value::Object(domains),
-        }
+        "enabled": true,
+        "mode": "full",
+        "allow_local_binding": config.allow_local,
+        "domains": Value::Object(domains),
     }))?;
     let state = build_config_state(config, NetworkProxyConstraints::default())?;
     let state = Arc::new(NetworkProxyState::with_reloader(
@@ -746,23 +744,21 @@ fn permission_profile(fs_mode: FsMode, net_mode: NetMode, cwd: &Path) -> Permiss
     };
 
     let file_system = match fs_mode {
-        FsMode::Readonly => FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-            path: FileSystemPath::Special {
+        FsMode::Readonly => FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry::new(
+            FileSystemPath::Special {
                 value: FileSystemSpecialPath::Root,
             },
-            access: FileSystemAccessMode::Read,
-        }]),
+            FileSystemAccessMode::Read,
+        )]),
         FsMode::Write => {
             let mut policy = FileSystemSandboxPolicy::workspace_write(&[], false, false);
             if cwd.join(".pi").exists() {
-                policy.entries.push(FileSystemSandboxEntry {
-                    path: FileSystemPath::Special {
-                        value: FileSystemSpecialPath::project_roots(Some(
-                            std::path::PathBuf::from(".pi"),
-                        )),
+                policy.entries.push(FileSystemSandboxEntry::new(
+                    FileSystemPath::Special {
+                        value: FileSystemSpecialPath::project_roots(Some(".pi".to_string())),
                     },
-                    access: FileSystemAccessMode::Read,
-                });
+                    FileSystemAccessMode::Read,
+                ));
             }
             policy
         }
@@ -883,6 +879,8 @@ mod tests {
             command: None,
             exec_policy_hint: None,
             execution_id: None,
+            disconnect: None,
+            cancellation: None,
         }
     }
 

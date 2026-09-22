@@ -6,12 +6,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RED=$'\033[31m'
 GREEN=$'\033[32m'
 BLUE=$'\033[34m'
+YELLOW=$'\033[33m'
 BOLD=$'\033[1m'
 RESET=$'\033[0m'
 
 PASS_COUNT=0
 FAIL_COUNT=0
-SESSION_ID="run-tests-session"
+SESSION_ID="run-tests-session-$$"
 TEST_ROOT=""
 PI_SANDBOX_BIN=""
 
@@ -91,12 +92,16 @@ write_project_config() {
         allow_block='["registry.terraform.io", "releases.hashicorp.com", "*.googleapis.com", "googleapis.com"]'
     fi
 
-    cat >"$case_dir/.pi/sandbox.json" <<EOF
+    cat >"$case_dir/.pi/settings.json" <<EOF
 {
-  "network_proxy": {
-    "allow": $allow_block,
-    "deny": [],
-    "allowLocal": false
+  "ZeePal": {
+    "sandbox": {
+      "network_proxy": {
+        "allow": $allow_block,
+        "deny": [],
+        "allow_local": false
+      }
+    }
   }
 }
 EOF
@@ -276,7 +281,7 @@ run_tool_bash_external_jsonl_test() {
     local case_dir="$TEST_ROOT/work/external-jsonl"
     local label="tool bash external jsonl approval"
     local stderr_file="$TEST_ROOT/stderr-tool-bash-external-jsonl.log"
-    local approval_line result_line wait_status sandbox_in sandbox_out
+    local approval_line result_line wait_status sandbox_in sandbox_out sandbox_pid
 
     rm -rf "$case_dir"
     mkdir -p "$case_dir"
@@ -285,20 +290,23 @@ run_tool_bash_external_jsonl_test() {
     coproc SANDBOX { HOME="$TEST_ROOT/home" "$PI_SANDBOX_BIN" tool bash --fs write --net restricted --cwd "$case_dir" --session "$SESSION_ID" --approval external 2>"$stderr_file"; }
     sandbox_in="${SANDBOX[1]}"
     sandbox_out="${SANDBOX[0]}"
+    # Bash creates this variable dynamically for the named coprocess.
+    # shellcheck disable=SC2153
+    sandbox_pid="$SANDBOX_PID"
 
     printf '%s\n' '{"type":"start","payload":{"command":"curl -fsS --max-time 15 https://google.com >/dev/null","timeout":30}}' >&"$sandbox_in"
 
     if ! IFS= read -r approval_line <&"$sandbox_out"; then
         fail "$label" "expected approval_request frame"
         eval "exec ${sandbox_in}>&-"
-        wait "$SANDBOX_PID" 2>/dev/null || true
+        wait "$sandbox_pid" 2>/dev/null || true
         return
     fi
 
     if [[ "$approval_line" != *'"type":"approval_request"'* || "$approval_line" != *'"id":"network#https_connect#google.com#443"'* ]]; then
         fail "$label" "unexpected approval frame: $approval_line"
         eval "exec ${sandbox_in}>&-"
-        wait "$SANDBOX_PID" 2>/dev/null || true
+        wait "$sandbox_pid" 2>/dev/null || true
         return
     fi
 
@@ -307,12 +315,12 @@ run_tool_bash_external_jsonl_test() {
     if ! IFS= read -r result_line <&"$sandbox_out"; then
         fail "$label" "expected result frame after approval"
         eval "exec ${sandbox_in}>&-"
-        wait "$SANDBOX_PID" 2>/dev/null || true
+        wait "$sandbox_pid" 2>/dev/null || true
         return
     fi
 
     eval "exec ${sandbox_in}>&-"
-    wait "$SANDBOX_PID"
+    wait "$sandbox_pid"
     wait_status=$?
 
     if [[ $wait_status -eq 0 && "$result_line" == *'"type":"result"'* && "$result_line" == *'"exitCode":0'* ]]; then
@@ -326,7 +334,7 @@ run_tool_bash_external_stdin_close_test() {
     local case_dir="$TEST_ROOT/work/external-jsonl-stdin-close"
     local label="tool bash external stdin close cancels"
     local stderr_file="$TEST_ROOT/stderr-tool-bash-external-stdin-close.log"
-    local approval_line wait_status sandbox_in sandbox_out
+    local approval_line wait_status sandbox_in sandbox_out sandbox_pid
 
     rm -rf "$case_dir"
     mkdir -p "$case_dir"
@@ -335,18 +343,21 @@ run_tool_bash_external_stdin_close_test() {
     coproc SANDBOX { HOME="$TEST_ROOT/home" "$PI_SANDBOX_BIN" tool bash --fs write --net restricted --cwd "$case_dir" --session "$SESSION_ID" --approval external 2>"$stderr_file"; }
     sandbox_in="${SANDBOX[1]}"
     sandbox_out="${SANDBOX[0]}"
+    # Bash creates this variable dynamically for the named coprocess.
+    # shellcheck disable=SC2153
+    sandbox_pid="$SANDBOX_PID"
 
     printf '%s\n' '{"type":"start","payload":{"command":"curl -fsS --max-time 30 https://google.com >/dev/null","timeout":30}}' >&"$sandbox_in"
 
     if ! IFS= read -r approval_line <&"$sandbox_out"; then
         fail "$label" "expected approval_request frame"
         eval "exec ${sandbox_in}>&-"
-        wait "$SANDBOX_PID" 2>/dev/null || true
+        wait "$sandbox_pid" 2>/dev/null || true
         return
     fi
 
     eval "exec ${sandbox_in}>&-"
-    wait "$SANDBOX_PID"
+    wait "$sandbox_pid"
     wait_status=$?
 
     if [[ $wait_status -ne 0 ]]; then
@@ -386,6 +397,7 @@ terraform_validate_in_sandbox() {
     local stderr_file="$3"
 
     HOME="$TEST_ROOT/home" TF_IN_AUTOMATION=1 \
+        TF_PLUGIN_CACHE_DIR="$TEST_ROOT/terraform-plugin-cache" \
         "$PI_SANDBOX_BIN" run --fs write --net "$net" --cwd "$case_dir" \
         --session "$SESSION_ID" --approval deny -- \
         terraform validate -no-color 2>>"$stderr_file"
@@ -407,9 +419,11 @@ run_terraform_google_provider_tests() {
     fi
 
     setup_terraform_google_provider_case "$case_dir"
+    mkdir -p "$TEST_ROOT/terraform-plugin-cache"
 
     stdout="$(
         HOME="$TEST_ROOT/home" TF_IN_AUTOMATION=1 \
+            TF_PLUGIN_CACHE_DIR="$TEST_ROOT/terraform-plugin-cache" \
             "$PI_SANDBOX_BIN" run --fs write --net restricted --cwd "$case_dir" \
             --session "$SESSION_ID" --approval deny -- \
             terraform init -input=false -no-color 2>"$stderr_file"
@@ -436,6 +450,52 @@ run_terraform_google_provider_tests() {
         pass "$none_label"
     else
         fail "$none_label" "exit=$status\nstderr=$(cat "$stderr_file")\nstdout=$stdout"
+    fi
+}
+
+run_agentwrap_integration_test() {
+    local label="agentwrap delegates IPC isolation to pi-sandbox"
+    local stderr_file="$TEST_ROOT/stderr-agentwrap.log"
+    local status
+
+    (
+        cd "$ROOT_DIR" || exit 1
+        # Expansion must happen inside agentwrap so this verifies its final environment.
+        # shellcheck disable=SC2016
+        agentwrap sh -c '
+            test "${AGENTWRAP_SANDBOX:-}" = true || {
+                echo "AGENTWRAP_SANDBOX=true was not supplied by agentwrap" >&2
+                exit 1
+            }
+            exec "$1" run --net r --fs u --cwd "$2" -- true
+        ' sh "$PI_SANDBOX_BIN" "$ROOT_DIR"
+    ) 2>"$stderr_file"
+    status=$?
+
+    if [[ $status -eq 0 ]]; then
+        pass "$label"
+    else
+        fail "$label" "exit=$status\nstderr=$(cat "$stderr_file")"
+    fi
+}
+
+run_agentwrap_full_suite() {
+    local requested_binary="$1"
+    local label="complete smoke suite passes through agentwrap"
+    local status
+
+    printf '\n%s== complete suite via agentwrap ==%s\n' "$BOLD" "$RESET"
+    (
+        cd "$ROOT_DIR" || exit 1
+        env -u TF_PLUGIN_CACHE_DIR agentwrap "$ROOT_DIR/scripts/run_smoke_tests" \
+            "$requested_binary" --agentwrap-child
+    )
+    status=$?
+
+    if [[ $status -eq 0 ]]; then
+        pass "$label"
+    else
+        fail "$label" "exit=$status"
     fi
 }
 
@@ -471,14 +531,29 @@ run_combo() {
 }
 
 main() {
+    local requested_binary="${1:-}"
+    local run_mode="${2:-}"
+    local agentwrap_child=0
+    if [[ "$run_mode" == "--agentwrap-child" ]]; then
+        agentwrap_child=1
+    elif [[ -n "$run_mode" ]]; then
+        printf '%sUnknown argument:%s %s\n' "$RED" "$RESET" "$run_mode" >&2
+        exit 1
+    fi
+
     need_cmd bwrap
     need_cmd sh
-    ensure_binary "${1:-}"
+    ensure_binary "$requested_binary"
+    export PI_SANDBOX_PROJECT_SETTINGS_TRUSTED=1
 
     TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/pi-sandbox-test.XXXXXX")"
     mkdir -p "$TEST_ROOT/home"
 
-    printf '%sUsing pi-sandbox:%s %s\n' "$BLUE" "$RESET" "$PI_SANDBOX_BIN"
+    local displayed_binary="$PI_SANDBOX_BIN"
+    if [[ "$PI_SANDBOX_BIN" != */* ]]; then
+        displayed_binary="$(command -v "$PI_SANDBOX_BIN")"
+    fi
+    printf '%sUsing pi-sandbox:%s %s\n' "$BLUE" "$RESET" "$displayed_binary"
     printf '%sTemp root:%s %s\n' "$BLUE" "$RESET" "$TEST_ROOT"
 
     local fs net
@@ -495,12 +570,31 @@ main() {
     printf '\n%s== terraform ==%s\n' "$BOLD" "$RESET"
     run_terraform_google_provider_tests
 
-    printf '\n%sSummary%s\n' "$BOLD" "$RESET"
-    printf '  %sPASS%s: %d\n' "$GREEN" "$RESET" "$PASS_COUNT"
-    printf '  %sFAIL%s: %d\n' "$RED" "$RESET" "$FAIL_COUNT"
+    local agentwrap_deferred=0
+    if [[ $agentwrap_child -eq 0 ]] && command -v agentwrap >/dev/null 2>&1; then
+        if [[ -z ${AGENTWRAP_SANDBOX+x} ]]; then
+            printf '\n%s== agentwrap integration ==%s\n' "$BOLD" "$RESET"
+            run_agentwrap_integration_test
+            run_agentwrap_full_suite "$requested_binary"
+        elif [[ ${AGENTWRAP_SANDBOX:-} == "true" ]]; then
+            agentwrap_deferred=1
+        fi
+    fi
+
+    if [[ $agentwrap_child -eq 0 ]]; then
+        printf '\n%sSummary%s\n' "$BOLD" "$RESET"
+        printf '  %sPASS%s: %d\n' "$GREEN" "$RESET" "$PASS_COUNT"
+        printf '  %sFAIL%s: %d\n' "$RED" "$RESET" "$FAIL_COUNT"
+    fi
 
     if [[ $FAIL_COUNT -ne 0 ]]; then
         exit 1
+    fi
+
+    if [[ $agentwrap_deferred -eq 1 ]]; then
+        printf '\n%sWARNING:%s agentwrap integration was skipped because this test run is already inside agentwrap.\n' \
+            "$YELLOW" "$RESET"
+        printf 'Run %s outside agentwrap as the final verification step.\n' "$0 ${1:-}"
     fi
 }
 

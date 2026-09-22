@@ -81,3 +81,4 @@ filesystem mode; and `n`, `r`, `u`, `s`, or `sandboxed` for network mode.
 
 ## Notes
 - session approvals are stored under `~/.pi/agent/sandbox-sessions/`
+- when `AGENTWRAP_SANDBOX=true`, the trusted outer sandbox supplies IPC namespace isolation, so the inner Bubblewrap invocation does not request a redundant IPC namespace

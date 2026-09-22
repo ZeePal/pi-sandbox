@@ -1,18 +1,58 @@
+diff --git a/codex-rs/linux-sandbox/src/bwrap.rs b/codex-rs/linux-sandbox/src/bwrap.rs
+index d63997d..0cb1189 100644
+--- a/codex-rs/linux-sandbox/src/bwrap.rs
++++ b/codex-rs/linux-sandbox/src/bwrap.rs
+@@ -269,6 +269,16 @@ pub(crate) fn create_bwrap_command_args(
+     )
+ }
+
++fn outer_sandbox_provides_ipc_isolation() -> bool {
++    std::env::var("AGENTWRAP_SANDBOX").as_deref() == Ok("true")
++}
++
++fn append_ipc_isolation_arg(args: &mut Vec<String>) {
++    if !outer_sandbox_provides_ipc_isolation() {
++        args.push("--unshare-ipc".to_string());
++    }
++}
++
+ fn create_bwrap_flags_full_filesystem(command: Vec<String>, options: BwrapOptions) -> BwrapArgs {
+     let mut args = vec![
+         "--new-session".to_string(),
+@@ -287,8 +297,8 @@ fn create_bwrap_flags_full_filesystem(command: Vec<String>, options: BwrapOption
+         // not need ambient CAP_SYS_ADMIN to create the remaining namespaces.
+         "--unshare-user".to_string(),
+         "--unshare-pid".to_string(),
+-        "--unshare-ipc".to_string(),
+     ];
++    append_ipc_isolation_arg(&mut args);
+     if options.network_mode.should_unshare_network() {
+         args.push("--unshare-net".to_string());
+     }
+@@ -350,7 +360,7 @@ fn create_bwrap_flags(
+     // auto-enable behavior, which is skipped when the caller runs as uid 0.
+     args.push("--unshare-user".to_string());
+     args.push("--unshare-pid".to_string());
+-    args.push("--unshare-ipc".to_string());
++    append_ipc_isolation_arg(&mut args);
+     if options.network_mode.should_unshare_network() {
+         args.push("--unshare-net".to_string());
+     }
 diff --git a/codex-rs/linux-sandbox/src/landlock.rs b/codex-rs/linux-sandbox/src/landlock.rs
-index 65ba3eb..5f4c048 100644
+index 0d07441..6c2f43a 100644
 --- a/codex-rs/linux-sandbox/src/landlock.rs
 +++ b/codex-rs/linux-sandbox/src/landlock.rs
-@@ -147,7 +147,7 @@ fn install_filesystem_landlock_rules_on_current_thread(
+@@ -156,7 +156,7 @@ fn install_filesystem_landlock_rules_on_current_thread(
          .create()?
          .add_rules(landlock::path_beneath_rules(&["/"], access_ro))?
          .add_rules(landlock::path_beneath_rules(&["/dev/null"], access_rw))?
 -        .set_no_new_privs(true);
 +        .no_new_privs(true);
- 
+
      if !writable_roots.is_empty() {
          ruleset = ruleset.add_rules(landlock::path_beneath_rules(&writable_roots, access_rw))?;
-@@ -185,23 +185,12 @@ fn install_network_seccomp_filter_on_current_thread(
- 
+@@ -198,23 +198,12 @@ fn install_network_seccomp_filter_on_current_thread(
+
      match mode {
          NetworkSeccompMode::Restricted => {
 -            deny_syscall(&mut rules, libc::SYS_connect);
@@ -35,10 +75,10 @@ index 65ba3eb..5f4c048 100644
              deny_syscall(&mut rules, libc::SYS_recvmmsg);
 -            deny_syscall(&mut rules, libc::SYS_getsockopt);
 -            deny_syscall(&mut rules, libc::SYS_setsockopt);
- 
+
              // For `socket` we allow AF_UNIX (arg0 == AF_UNIX) and deny
              // everything else.
-@@ -217,12 +206,10 @@ fn install_network_seccomp_filter_on_current_thread(
+@@ -230,12 +219,10 @@ fn install_network_seccomp_filter_on_current_thread(
          }
          NetworkSeccompMode::ProxyRouted => {
              // In proxy-routed mode we allow IP sockets in the isolated
@@ -55,7 +95,7 @@ index 65ba3eb..5f4c048 100644
                  SeccompCondition::new(
                      0,
                      SeccompCmpArgLen::Dword,
-@@ -235,6 +222,12 @@ fn install_network_seccomp_filter_on_current_thread(
+@@ -248,6 +235,12 @@ fn install_network_seccomp_filter_on_current_thread(
                      SeccompCmpOp::Ne,
                      libc::AF_INET6 as u64,
                  )?,
@@ -68,7 +108,7 @@ index 65ba3eb..5f4c048 100644
              ])?;
              let deny_non_unix_socketpair = SeccompRule::new(vec![SeccompCondition::new(
                  0,
-@@ -242,7 +235,7 @@ fn install_network_seccomp_filter_on_current_thread(
+@@ -255,7 +248,7 @@ fn install_network_seccomp_filter_on_current_thread(
                  SeccompCmpOp::Ne,
                  libc::AF_UNIX as u64,
              )?])?;
@@ -76,4 +116,4 @@ index 65ba3eb..5f4c048 100644
 +            rules.insert(libc::SYS_socket, vec![deny_non_ip_or_unix_socket]);
              rules.insert(libc::SYS_socketpair, vec![deny_non_unix_socketpair]);
          }
-     }
+         NetworkSeccompMode::VmSocketRestricted => {

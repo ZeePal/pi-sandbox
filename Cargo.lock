@@ -145,6 +145,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "appcontainer_common"
+version = "0.8.0"
+source = "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#6cd3d58f05d3447e67109cfb75e042803b843ca4"
+dependencies = [
+ "flatbuffers",
+ "getrandom 0.2.17",
+ "learning_mode_core",
+ "learning_mode_windows",
+ "process_security_environment_spec",
+ "sandbox_spec",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "widestring",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "winreg 0.55.0",
+ "wxc_common",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -499,6 +520,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cidr"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "579504560394e388085d0c080ea587dfa5c15f7e251b4d5247d1e1a61d1d6928"
+
+[[package]]
 name = "clap"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -573,7 +600,7 @@ dependencies = [
 
 [[package]]
 name = "codex-api"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "async-channel",
  "base64",
@@ -588,7 +615,6 @@ dependencies = [
  "futures",
  "http",
  "regex-lite",
- "reqwest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -599,11 +625,12 @@ dependencies = [
  "tracing",
  "tungstenite",
  "url",
+ "uuid",
 ]
 
 [[package]]
 name = "codex-async-utils"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "tokio",
  "tokio-util",
@@ -611,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "codex-client"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "codex-http-client",
  "eventsource-stream",
@@ -619,11 +646,12 @@ dependencies = [
  "http",
  "rand 0.9.4",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "codex-execpolicy"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -633,27 +661,31 @@ dependencies = [
  "serde_json",
  "shlex",
  "starlark",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
 name = "codex-extension-items"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "codex-utils-absolute-path",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "ts-rs",
 ]
 
 [[package]]
 name = "codex-http-client"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "bytes",
  "codex-utils-rustls-provider",
  "futures",
  "http",
+ "native-tls",
  "opentelemetry",
  "reqwest",
  "rustls",
@@ -673,15 +705,18 @@ dependencies = [
 
 [[package]]
 name = "codex-install-context"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "codex-utils-absolute-path",
  "codex-utils-home-dir",
+ "semver",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "codex-linux-sandbox"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "clap",
  "codex-install-context",
@@ -693,6 +728,7 @@ dependencies = [
  "globset",
  "landlock",
  "libc",
+ "rustix",
  "seccompiler",
  "serde",
  "serde_json",
@@ -701,8 +737,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-mxc-sandbox"
+version = "0.155.1"
+dependencies = [
+ "anyhow",
+ "appcontainer_common",
+ "codex-protocol",
+ "codex-utils-absolute-path",
+ "codex-utils-path-uri",
+ "codex-windows-sandbox",
+ "learning_mode_windows",
+ "thiserror 2.0.18",
+ "tracelogging",
+ "windows-sys 0.61.2",
+ "wxc_common",
+]
+
+[[package]]
 name = "codex-network-proxy"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -712,6 +765,7 @@ dependencies = [
  "codex-utils-home-dir",
  "codex-utils-rustls-provider",
  "globset",
+ "opentelemetry",
  "rama-core",
  "rama-http",
  "rama-http-backend",
@@ -721,8 +775,13 @@ dependencies = [
  "rama-tls-rustls",
  "rama-unix",
  "rand 0.9.4",
+ "rand_regex",
+ "regex",
+ "regex-automata",
+ "regex-syntax",
  "rustls-native-certs",
  "schannel",
+ "schemars 0.8.22",
  "security-framework",
  "serde",
  "serde_json",
@@ -732,11 +791,12 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
 name = "codex-otel"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "chrono",
  "codex-api",
@@ -766,33 +826,36 @@ dependencies = [
 
 [[package]]
 name = "codex-process-hardening"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "codex-protocol"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "chardetng",
  "chrono",
  "codex-async-utils",
  "codex-execpolicy",
  "codex-extension-items",
+ "codex-http-client",
  "codex-network-proxy",
  "codex-utils-absolute-path",
  "codex-utils-image",
  "codex-utils-path-uri",
+ "codex-utils-redacted-string",
  "codex-utils-string",
  "encoding_rs",
+ "gix-url",
  "globset",
+ "http",
  "icu_decimal",
  "icu_locale_core",
  "icu_provider",
  "landlock",
  "quick-xml",
- "reqwest",
  "schemars 0.8.22",
  "seccompiler",
  "serde",
@@ -811,18 +874,23 @@ dependencies = [
 
 [[package]]
 name = "codex-sandboxing"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
+ "anyhow",
+ "codex-mxc-sandbox",
  "codex-network-proxy",
+ "codex-otel",
  "codex-protocol",
  "codex-utils-absolute-path",
  "codex-utils-home-dir",
  "codex-utils-path-uri",
+ "codex-utils-pty",
  "codex-windows-sandbox",
  "dunce",
  "libc",
  "regex-lite",
  "serde_json",
+ "tokio",
  "tracing",
  "url",
  "which",
@@ -830,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-absolute-path"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "dirs",
  "dunce",
@@ -841,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-cache"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "lru",
  "sha1",
@@ -850,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-home-dir"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "codex-utils-absolute-path",
  "dirs",
@@ -858,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-image"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "base64",
  "codex-utils-cache",
@@ -870,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-path-uri"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "base64",
  "codex-utils-absolute-path",
@@ -884,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-pty"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "anyhow",
  "filedescriptor",
@@ -898,15 +966,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-utils-redacted-string"
+version = "0.155.1"
+dependencies = [
+ "schemars 0.8.22",
+ "serde",
+]
+
+[[package]]
 name = "codex-utils-rustls-provider"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "rustls",
 ]
 
 [[package]]
 name = "codex-utils-string"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "regex-lite",
  "serde",
@@ -915,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "codex-websocket-client"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "codex-http-client",
  "futures",
@@ -928,7 +1004,7 @@ dependencies = [
 
 [[package]]
 name = "codex-windows-sandbox"
-version = "0.144.4"
+version = "0.155.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -947,7 +1023,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing-appender",
- "windows",
+ "windows 0.58.0",
  "windows-sys 0.52.0",
 ]
 
@@ -1685,6 +1761,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "flatbuffers"
+version = "25.12.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35f6839d7b3b98adde531effaf34f0c2badc6f4735d26fe74709d8e513a96ef3"
+dependencies = [
+ "bitflags 2.11.1",
+ "rustc_version",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1950,6 +2036,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "gix-path"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8fd1fe596dc393b538e1d5492c5585971a9311475b3255f7b889023df208476"
+dependencies = [
+ "bstr",
+ "gix-trace",
+ "gix-validate",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "gix-trace"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be3eb81d9dc914335923e50d52829c551feefd6a72d176c4130c546b67a60814"
+
+[[package]]
+name = "gix-url"
+version = "0.35.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a61ead12e33fa52ae92b207ee27554f646a8e7a3dad8b78da1582ec91eda0a6"
+dependencies = [
+ "bstr",
+ "gix-path",
+ "percent-encoding",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "gix-validate"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dae8780f63ed8a803b8bdabbd7aa5f5c5d74592c8b50eed875c1bb4f6545a6a"
+dependencies = [
+ "bstr",
+]
+
+[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2033,6 +2158,11 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "headers"
@@ -2658,6 +2788,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "learning_mode_core"
+version = "0.8.0"
+source = "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#6cd3d58f05d3447e67109cfb75e042803b843ca4"
+dependencies = [
+ "same-file",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "learning_mode_windows"
+version = "0.8.0"
+source = "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#6cd3d58f05d3447e67109cfb75e042803b843ca4"
+dependencies = [
+ "learning_mode_core",
+ "sha2",
+ "thiserror 2.0.18",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "wxc_common",
+]
+
+[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2785,11 +2941,11 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.16.4"
+version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+checksum = "ff9840bcc50b71349309900da0ce7279aa336ae71d73250b07998932c7d97c25"
 dependencies = [
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -2930,6 +3086,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "mxc_config_contract"
+version = "0.8.0"
+source = "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#6cd3d58f05d3447e67109cfb75e042803b843ca4"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "mxc_telemetry"
+version = "0.8.0"
+source = "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#6cd3d58f05d3447e67109cfb75e042803b843ca4"
+dependencies = [
+ "tracelogging",
+ "uuid",
 ]
 
 [[package]]
@@ -3582,7 +3757,7 @@ dependencies = [
  "shared_library",
  "shell-words",
  "winapi",
- "winreg",
+ "winreg 0.10.1",
 ]
 
 [[package]]
@@ -3651,6 +3826,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "process_security_environment_spec"
+version = "0.8.0"
+source = "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#6cd3d58f05d3447e67109cfb75e042803b843ca4"
+dependencies = [
+ "flatbuffers",
 ]
 
 [[package]]
@@ -4242,6 +4425,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_regex"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04db2e382d13679a1e42400e90e306cdbb79dc5cd41bb035ba4eae72e78cdf37"
+dependencies = [
+ "rand 0.9.4",
+ "regex-syntax",
+]
+
+[[package]]
 name = "rand_xorshift"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4553,6 +4746,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "same-file"
+version = "1.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
+name = "sandbox_spec"
+version = "0.8.0"
+source = "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#6cd3d58f05d3447e67109cfb75e042803b843ca4"
+dependencies = [
+ "flatbuffers",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4700,6 +4910,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "sequence_trie"
@@ -4772,6 +4986,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
+dependencies = [
+ "itoa",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -5594,6 +5819,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
+name = "tracelogging"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4314470f3f54b29d582ff6776fceb7c819b023141828d559f19c790cee40e94"
+dependencies = [
+ "tracelogging_macros",
+]
+
+[[package]]
+name = "tracelogging_macros"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95e2d891464ff33bc1814c4cbbb251bae7800458b1efdb6ac8b7c01ee6382563"
+
+[[package]]
 name = "tracing"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5767,6 +6007,12 @@ name = "unicase"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
+
+[[package]]
+name = "unicode-general-category"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
 
 [[package]]
 name = "unicode-ident"
@@ -6112,6 +6358,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows"
+version = "0.62.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
+dependencies = [
+ "windows-collections",
+ "windows-core 0.62.2",
+ "windows-future",
+ "windows-numerics",
+]
+
+[[package]]
+name = "windows-collections"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610"
+dependencies = [
+ "windows-core 0.62.2",
+]
+
+[[package]]
 name = "windows-core"
 version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6135,6 +6402,17 @@ dependencies = [
  "windows-link",
  "windows-result 0.4.1",
  "windows-strings 0.5.1",
+]
+
+[[package]]
+name = "windows-future"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
+dependencies = [
+ "windows-core 0.62.2",
+ "windows-link",
+ "windows-threading",
 ]
 
 [[package]]
@@ -6186,6 +6464,16 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
+name = "windows-numerics"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
+dependencies = [
+ "windows-core 0.62.2",
+ "windows-link",
+]
 
 [[package]]
 name = "windows-registry"
@@ -6279,6 +6567,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-threading"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
+dependencies = [
+ "windows-link",
+]
+
+[[package]]
 name = "windows_aarch64_gnullvm"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6342,6 +6639,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "winreg"
+version = "0.55.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb5a765337c50e9ec252c2069be9bf91c7df47afb103b642ba3a53bf8101be97"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6443,6 +6750,30 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "wxc_common"
+version = "0.8.0"
+source = "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#6cd3d58f05d3447e67109cfb75e042803b843ca4"
+dependencies = [
+ "base64",
+ "cidr",
+ "getrandom 0.2.17",
+ "libc",
+ "mxc_config_contract",
+ "mxc_telemetry",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "thiserror 2.0.18",
+ "unicode-general-category",
+ "url",
+ "widestring",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "winreg 0.55.0",
+]
 
 [[package]]
 name = "x509-parser"
