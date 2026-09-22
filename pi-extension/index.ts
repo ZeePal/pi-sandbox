@@ -136,6 +136,11 @@ function directPassthroughMode(state: SandboxState): boolean {
     return state.fs === "unrestricted" && state.net === "unrestricted";
 }
 
+function filesystemFooterLabel(state: SandboxState): string {
+    if (state.fs !== "unrestricted") return state.fs;
+    return state.outerSandbox ? "sandboxed" : "unrestricted";
+}
+
 function networkFooterLabel(state: SandboxState): string {
     if (state.net === "none") return "none";
     if (state.net === "restricted") return "restricted";
@@ -151,7 +156,7 @@ function pendingApprovalCount(): number {
 }
 
 function footerLabel(state: SandboxState): string {
-    const base = `${state.fs} ${networkFooterLabel(state)}`;
+    const base = `fs:${filesystemFooterLabel(state)} net:${networkFooterLabel(state)}`;
     const pending = pendingApprovalCount();
     return pending > 0 ? `${base} approvals:${pending}` : base;
 }
