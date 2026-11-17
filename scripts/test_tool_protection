@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Verify agent-state, workspace-history and lazy proxy-denial logging isolation."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+
+def run(binary, env, cwd, command, mode="write", net="none"):
+    """Execute a fake-home sandbox command and surface failures."""
+    result = subprocess.run(
+        [binary, "run", "--fs", mode, "--net", net, "--session", "security-test",
+         "--cwd", str(cwd), "bash", "-c", command],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, (mode, result.stdout, result.stderr)
+
+
+def seed_home(home, cwd):
+    """Create fake credentials, readable configuration and mixed-workspace history."""
+    agent = home / ".pi/agent"
+    agent.mkdir(parents=True)
+    dotfiles = home / ".dotfiles/pi"
+    dotfiles.mkdir(parents=True)
+    (dotfiles / "settings.json").write_text("{}")
+    (agent / "settings.json").symlink_to(dotfiles / "settings.json")
+    (dotfiles / "secret").write_text("SECRET")
+    (agent / "auth.json").symlink_to(dotfiles / "secret")
+    (agent / "models-store.json").write_text("catalog")
+    (agent / "extensions").mkdir()
+    (agent / "extensions/example.ts").write_text("extension")
+    (agent / "other-config.json").write_text("config")
+    sessions = agent / "sessions"
+    own = sessions / ("--" + str(cwd).lstrip("/").replace("/", "-") + "--")
+    own.mkdir(parents=True)
+    for name, workspace in [("previous", str(cwd)), ("collision", "/elsewhere")]:
+        (own / f"{name}.jsonl").write_text(json.dumps({"type": "session", "cwd": workspace}) + "\n")
+    other = sessions / "--elsewhere--"
+    other.mkdir()
+    (other / "private.jsonl").write_text("SECRET")
+    return agent, own
+
+
+def main():
+    """Run isolation checks without touching real agent secrets."""
+    binary = str(Path(__file__).resolve().parents[1] / "target/debug/pi-sandbox")
+    with tempfile.TemporaryDirectory(prefix="pi-security-") as tmp:
+        home = Path(tmp)
+        cwd = home / "workspace"
+        cwd.mkdir()
+        # Session access must use the actual cwd, not the enclosing git root.
+        (home / ".git").mkdir()
+        agent, own = seed_home(home, cwd)
+        env = dict(os.environ, HOME=tmp, OWN_SESSION_DIR=str(own))
+        for mode in ["readonly", "write"]:
+            run(binary, env, cwd, '''
+                test ! -s "$HOME/.pi/agent/auth.json" &&
+                test ! -s "$HOME/.dotfiles/pi/secret" &&
+                cat "$HOME/.pi/agent/models-store.json" &&
+                ! cat "$HOME/.pi/agent/sessions/--elsewhere--/private.jsonl" >/dev/null 2>&1 &&
+                test ! -s "$OWN_SESSION_DIR/collision.jsonl" &&
+                cat "$OWN_SESSION_DIR/previous.jsonl" &&
+                cat "$HOME/.pi/agent/settings.json" &&
+                cat "$HOME/.pi/agent/extensions/example.ts" &&
+                cat "$HOME/.pi/agent/other-config.json" &&
+                ! echo x >> "$HOME/.dotfiles/pi/settings.json" &&
+                ! echo x >> "$OWN_SESSION_DIR/previous.jsonl"
+            ''', mode=mode)
+        run(binary, env, cwd, '''
+            echo writable > "$HOME/.dotfiles/unrelated" &&
+            ! echo changed >> "$HOME/.pi/agent/models-store.json"
+        ''')
+        log = agent / "sandbox-sessions/security-test.proxy-denys.jsonl"
+        run(binary, env, cwd, "true", net="restricted")
+        assert not log.exists(), "proxy startup must not create a denial file"
+        run(binary, env, cwd, '''
+            curl -sS --max-time 5 https://denied.invalid >/dev/null 2>&1;
+            cat "$HOME/.pi/agent/sandbox-sessions/security-test.proxy-denys.jsonl" &&
+            ! echo forged >> "$HOME/.pi/agent/sandbox-sessions/security-test.proxy-denys.jsonl"
+        ''', net="restricted")
+        records = [json.loads(line) for line in log.read_text().splitlines()]
+        assert any(event["host"] == "denied.invalid" and event["session_id"] == "security-test"
+                   and event["port"] == 443 and event["protocol"] and event["timestamp"] for event in records), records
+        initial_count = len(records)
+        run(binary, env, cwd, "curl -sS --max-time 5 https://denied.invalid; true", net="restricted")
+        assert len(log.read_text().splitlines()) > initial_count, "later denials must append"
+    print("PASS: secret masks, readonly config, workspace-only history and lazy session denial logs")
+
+
+if __name__ == "__main__":
+    main()

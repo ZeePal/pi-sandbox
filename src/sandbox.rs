@@ -344,7 +344,6 @@ async fn execute_command_capture(
     approval_manager: Option<Arc<ApprovalManager>>,
 ) -> Result<CommandCapture> {
     let sandbox_policy_cwd = workspace_root_or_cwd(&options.cwd);
-    let permission_profile = permission_profile(options.fs, options.net, &sandbox_policy_cwd);
     let mut env = current_env_without_proxy();
     let mut proxy_runtime = None;
 
@@ -353,6 +352,9 @@ async fn execute_command_capture(
         proxy.proxy.apply_to_env(&mut env);
         proxy_runtime = Some(proxy);
     }
+
+    let permission_profile =
+        permission_profile(options.fs, options.net, &sandbox_policy_cwd, &options.cwd)?;
 
     let helper_args = create_linux_sandbox_command_args_for_permission_profile(
         command,
@@ -437,7 +439,6 @@ async fn execute_command_inherit(
     approval_manager: Option<Arc<ApprovalManager>>,
 ) -> Result<i32> {
     let sandbox_policy_cwd = workspace_root_or_cwd(&options.cwd);
-    let permission_profile = permission_profile(options.fs, options.net, &sandbox_policy_cwd);
     let mut env = current_env_without_proxy();
     let mut proxy_runtime = None;
 
@@ -446,6 +447,9 @@ async fn execute_command_inherit(
         proxy.proxy.apply_to_env(&mut env);
         proxy_runtime = Some(proxy);
     }
+
+    let permission_profile =
+        permission_profile(options.fs, options.net, &sandbox_policy_cwd, &options.cwd)?;
 
     let helper_args = create_linux_sandbox_command_args_for_permission_profile(
         command,
@@ -649,7 +653,10 @@ async fn start_managed_proxy(
         Arc::new(NoopReloader),
     ));
 
-    let mut builder = NetworkProxy::builder().state(state);
+    let denial_log = crate::denial_log::DenialLog::open(options.session.clone())?;
+    let mut builder = NetworkProxy::builder()
+        .state(state)
+        .blocked_request_observer(denial_log);
     if let Some(manager) = approval_manager {
         let decider: Arc<dyn NetworkPolicyDecider> = manager;
         builder = builder.policy_decider_arc(decider);
@@ -736,9 +743,14 @@ fn bash_result_json(capture: CommandCapture) -> Value {
     })
 }
 
-fn permission_profile(fs_mode: FsMode, net_mode: NetMode, cwd: &Path) -> PermissionProfile {
+fn permission_profile(
+    fs_mode: FsMode,
+    net_mode: NetMode,
+    cwd: &Path,
+    tool_cwd: &Path,
+) -> Result<PermissionProfile> {
     if matches!(fs_mode, FsMode::Unrestricted) && matches!(net_mode, NetMode::Unrestricted) {
-        return PermissionProfile::Disabled;
+        return Ok(PermissionProfile::Disabled);
     }
 
     let network = match net_mode {
@@ -746,7 +758,7 @@ fn permission_profile(fs_mode: FsMode, net_mode: NetMode, cwd: &Path) -> Permiss
         NetMode::Unrestricted | NetMode::Restricted => NetworkSandboxPolicy::Enabled,
     };
 
-    let file_system = match fs_mode {
+    let mut file_system = match fs_mode {
         FsMode::Readonly => FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry::new(
             FileSystemPath::Special {
                 value: FileSystemSpecialPath::Root,
@@ -768,7 +780,13 @@ fn permission_profile(fs_mode: FsMode, net_mode: NetMode, cwd: &Path) -> Permiss
         FsMode::Unrestricted => FileSystemSandboxPolicy::unrestricted(),
     };
 
-    PermissionProfile::from_runtime_permissions(&file_system, network)
+    if fs_mode != FsMode::Unrestricted {
+        crate::tool_protection::protect_home(&mut file_system, tool_cwd)?;
+    }
+    Ok(PermissionProfile::from_runtime_permissions(
+        &file_system,
+        network,
+    ))
 }
 
 fn workspace_root_or_cwd(cwd: &Path) -> PathBuf {
@@ -841,7 +859,7 @@ mod tests {
     #[test]
     fn managed_network_helper_args_preserve_unix_ipc_grant() {
         let cwd = Path::new("/tmp");
-        let profile = permission_profile(FsMode::Readonly, NetMode::Restricted, cwd);
+        let profile = permission_profile(FsMode::Readonly, NetMode::Restricted, cwd, cwd).unwrap();
         let context = ManagedNetworkSandboxContext {
             dangerously_allow_all_unix_sockets: true,
             ..Default::default()
@@ -867,7 +885,7 @@ mod tests {
     #[test]
     fn offline_helper_args_do_not_enable_managed_network() {
         let cwd = Path::new("/tmp");
-        let profile = permission_profile(FsMode::Readonly, NetMode::None, cwd);
+        let profile = permission_profile(FsMode::Readonly, NetMode::None, cwd, cwd).unwrap();
         let args = create_linux_sandbox_command_args_for_permission_profile(
             vec!["true".to_string()],
             cwd,

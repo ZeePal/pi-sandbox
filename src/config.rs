@@ -197,7 +197,7 @@ fn session_policy_dir() -> Result<PathBuf> {
     Ok(agent_dir()?.join("sandbox-sessions"))
 }
 
-fn session_policy_path(session: &str) -> Result<PathBuf> {
+pub(crate) fn session_policy_path(session: &str) -> Result<PathBuf> {
     let safe = session
         .chars()
         .map(|ch| {

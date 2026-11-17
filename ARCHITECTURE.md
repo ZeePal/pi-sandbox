@@ -84,6 +84,21 @@ Codex's helper owns the hard part:
 - **Global wildcard hosts are rejected.** Config validation blocks `"*"` as an allow/deny pattern.
 - **Full bypass is explicit.** Direct passthrough only happens when both filesystem and networking are set to `unrestricted`.
 
+## Agent state and audit logs
+- In `fs=readonly` / `fs=write`, `~/.pi` and optional `~/.dotfiles/pi` are read-only to tools,
+  including resolved symlink targets. Configuration and extensions remain readable;
+  `auth.json` uses deny mounts, not just read-only access.
+- Only the current cwd's default Pi session folder is readable. Existing JSONL headers
+  must also match that cwd, preventing folder-name collisions from exposing another
+  workspace. Other session contents are denied; folder names are not hidden.
+  Custom session directories are not automatically covered.
+- Approvals and proxy-denial logs are readable but not writable by tools. The trusted
+  sidecar writes outside the tool sandbox; denial logs are created lazily and include
+  host, port (when available), protocol, timestamp, reason, and session ID.
+  Without a session, logs use `no-session.proxy-denys.jsonl`. Logging failures stop the sidecar.
+- These protections do not apply to `fs=unrestricted` or other unsandboxed processes.
+  Secrets stored in other readable files are not automatically detected.
+
 ## Common modes
 | Mode                          | Filesystem                      | Networking            | What actually happens        |
 | ---                           | ---                             | ---                   | ---                          |
@@ -100,3 +115,5 @@ Codex's helper owns the hard part:
 - `src/approval.rs` - prompt/external approval brokers and JSONL framing
 - `src/config.rs` - config merge, validation, policy persistence
 - `src/internal_tools.rs` - file tools that are executed inside the sandbox
+- `src/tool_protection.rs` - agent-state and workspace-session filesystem rules
+- `src/denial_log.rs` - lazy session-scoped proxy denial logging

@@ -4132,6 +4132,7 @@ dependencies = [
  "codex-network-proxy",
  "codex-protocol",
  "codex-sandboxing",
+ "codex-utils-path-uri",
  "serde",
  "serde_json",
  "tokio",

@@ -80,5 +80,6 @@ filesystem mode; and `n`, `r`, `u`, `s`, or `sandboxed` for network mode.
 - See: [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Notes
-- session approvals are stored under `~/.pi/agent/sandbox-sessions/`
+- session approvals: `~/.pi/agent/sandbox-sessions/<ID>.json`
+- proxy denials: same folder, `<ID>.proxy-denys.jsonl` (created on the first denial)
 - when `AGENTWRAP_SANDBOX=true`, the trusted outer sandbox supplies IPC namespace isolation, so the inner Bubblewrap invocation does not request a redundant IPC namespace
