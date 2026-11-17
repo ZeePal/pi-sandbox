@@ -19,7 +19,7 @@ scripts/prepare_codex_vendor
 Build and install:
 ```bash
 cargo install --locked --path .
-ln -s "$PWD/pi-extension/index.ts" ~/.pi/agent/extensions/pi-sandbox.ts
+ln -s "$PWD/pi-extension" ~/.pi/agent/extensions/pi-sandbox
 ```
 
 For local verification:
@@ -27,8 +27,21 @@ For local verification:
 scripts/prepare_codex_vendor
 cargo test --locked
 cargo build --locked
+node scripts/test_image_read.mjs
 scripts/run_smoke_tests debug
 ```
+
+The image regression test requires Node.js and a globally installed
+`@earendil-works/pi-coding-agent`. It compares sandboxed reads with native pi
+across all filesystem/network mode combinations, including model-specific
+resizing, non-vision notes, structured output, and binary-to-text fallback.
+
+Text reads retain sandbox-side pagination and truncation to bound JSONL output.
+Non-text or uncertain files are returned losslessly as base64 and passed to
+native pi through cached read operations, without reopening files on the host.
+Only the byte-signature detector is mirrored from pi; image conversion, resizing,
+model notes, and result formatting remain native. Detector parity is checked
+against the installed pi version by the regression test.
 
 To refresh the Codex checkout after changing the patch or tag:
 ```bash

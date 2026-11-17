@@ -1,3 +1,4 @@
+import { detectSupportedImageMimeType } from "./image-mime.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -549,7 +550,19 @@ export default function (pi: ExtensionAPI) {
             if (directPassthroughMode(state)) {
                 return originals.read.execute(id, params, signal, onUpdate, ctx);
             }
-            return makeReadResult(await resolveToolCall("read", params, ctx, signal));
+            const result = await resolveToolCall("read", params, ctx, signal);
+            assertSandboxSuccess(result);
+            if (typeof result.binary !== "string") return makeReadResult(result);
+            const bytes = Buffer.from(result.binary, "base64");
+            const nativeRead = createReadTool(ctx.cwd, {
+                operations: {
+                    // Successful sandbox read already checked access. Never reopen on the host.
+                    access: async () => {},
+                    readFile: async () => bytes,
+                    detectImageMimeType: async () => detectSupportedImageMimeType(bytes.subarray(0, 4100)),
+                },
+            });
+            return nativeRead.execute(id, params, signal, onUpdate, ctx);
         },
     });
 

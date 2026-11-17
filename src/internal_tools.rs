@@ -2,6 +2,7 @@ use crate::text::{
     relativize_tool_lines, truncate_head_text, MAX_TOOL_TEXT_BYTES, MAX_TOOL_TEXT_LINES,
 };
 use anyhow::{bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -137,6 +138,12 @@ fn internal_tool_read(payload_json: &str, cwd: &Path) -> Result<Value> {
     let path = resolve_input_path(cwd, &input.path);
     let content =
         std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    if !is_text(&content) {
+        return Ok(json!({
+            "ok": true,
+            "binary": STANDARD.encode(&content),
+        }));
+    }
     let text = String::from_utf8_lossy(&content).to_string();
     let all_lines: Vec<&str> = text.split('\n').collect();
     let total_lines = all_lines.len();
@@ -169,6 +176,16 @@ fn internal_tool_read(payload_json: &str, cwd: &Path) -> Result<Value> {
         "truncated": truncated.truncated,
         "lineCount": total_lines,
     }))
+}
+
+// False negatives only cost transport: native pi will decode non-images as text.
+// ASCII-compatible image signatures must not enter the paginated text path.
+fn is_text(bytes: &[u8]) -> bool {
+    let image_prefixes: &[&[u8]] = &[b"\x89PNG", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"RIFF", b"BM"];
+    if image_prefixes.iter().any(|prefix| bytes.starts_with(prefix)) {
+        return false;
+    }
+    !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok()
 }
 
 fn internal_tool_write(payload_json: &str, cwd: &Path) -> Result<Value> {
@@ -438,6 +455,50 @@ mod tests {
         assert_eq!(value.get("ok").and_then(Value::as_bool), Some(true));
         assert!(value.get("text").and_then(Value::as_str).is_some());
         assert!(value.get("truncated").and_then(Value::as_bool).is_some());
+    }
+
+    #[test]
+    fn binary_reads_preserve_all_bytes_without_pagination() {
+        let cwd = temp_test_dir();
+        let cases: &[&[u8]] = &[
+            b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"RIFF1234WEBP", b"BM",
+        ];
+        for signature in cases {
+            let mut bytes = signature.to_vec();
+            bytes.extend(vec![0xff; MAX_TOOL_TEXT_BYTES + 1]);
+            std::fs::write(cwd.join("image.data"), &bytes).unwrap();
+            let value = dispatch_internal_tool(
+                InternalToolName::Read,
+                r#"{"path":"image.data","offset":999,"limit":1}"#,
+                &cwd,
+            );
+            assert_eq!(value["ok"], true);
+            let decoded = STANDARD.decode(value["binary"].as_str().unwrap()).unwrap();
+            assert_eq!(decoded, bytes);
+            assert!(value.get("text").is_none());
+        }
+        std::fs::write(cwd.join("text.png"), "plain text").unwrap();
+        let value = dispatch_internal_tool(InternalToolName::Read, r#"{"path":"text.png"}"#, &cwd);
+        assert_text_success_schema(&value);
+        assert_eq!(value["text"], "plain text");
+        std::fs::remove_dir_all(cwd).unwrap();
+    }
+
+    #[test]
+    fn uncertain_text_falls_back_losslessly_and_large_text_stays_bounded() {
+        let cwd = temp_test_dir();
+        for bytes in [b"text\0data".as_slice(), b"\xff\xfe", b"BMactually text"] {
+            std::fs::write(cwd.join("input"), bytes).unwrap();
+            let value = dispatch_internal_tool(InternalToolName::Read, r#"{"path":"input"}"#, &cwd);
+            assert_eq!(STANDARD.decode(value["binary"].as_str().unwrap()).unwrap(), bytes);
+        }
+        std::fs::write(cwd.join("input"), "hello world\n".repeat(100_000)).unwrap();
+        let value = dispatch_internal_tool(InternalToolName::Read, r#"{"path":"input","limit":2}"#, &cwd);
+        assert_text_success_schema(&value);
+        assert_eq!(value["text"], "hello world\nhello world");
+        assert!(value.to_string().len() < 1024);
+        assert!(is_text("Unicode: 日本語".as_bytes()));
+        std::fs::remove_dir_all(cwd).unwrap();
     }
 
     #[test]
