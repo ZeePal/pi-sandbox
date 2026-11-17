@@ -10,19 +10,18 @@ use anyhow::{anyhow, bail, Context, Result};
 #[cfg(test)]
 use async_trait::async_trait;
 use codex_network_proxy::{
-    build_config_state, ConfigReloader, ConfigReloaderFuture, ConfigState, NetworkDecision,
-    NetworkPolicyDecider, NetworkPolicyDeciderFuture, NetworkPolicyRequest, NetworkProtocol,
-    NetworkProxy, NetworkProxyConfig, NetworkProxyConstraints, NetworkProxyState, PROXY_ENV_KEYS,
+    build_config_state, ConfigReloader, ConfigReloaderFuture, ConfigState,
+    ManagedNetworkSandboxContext, NetworkDecision, NetworkPolicyDecider,
+    NetworkPolicyDeciderFuture, NetworkPolicyRequest, NetworkProtocol, NetworkProxy,
+    NetworkProxyConfig, NetworkProxyConstraints, NetworkProxyState, Platform, PROXY_ENV_KEYS,
 };
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::permissions::{
     FileSystemAccessMode, FileSystemPath, FileSystemSandboxEntry, FileSystemSandboxPolicy,
     FileSystemSpecialPath, NetworkSandboxPolicy,
 };
-use codex_sandboxing::find_system_bwrap_in_path;
 use codex_sandboxing::landlock::{
-    allow_network_for_proxy, create_linux_sandbox_command_args_for_permission_profile,
-    CODEX_LINUX_SANDBOX_ARG0,
+    create_linux_sandbox_command_args_for_permission_profile, CODEX_LINUX_SANDBOX_ARG0,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -344,8 +343,6 @@ async fn execute_command_capture(
     config: &EffectiveConfig,
     approval_manager: Option<Arc<ApprovalManager>>,
 ) -> Result<CommandCapture> {
-    ensure_bwrap_available()?;
-
     let sandbox_policy_cwd = workspace_root_or_cwd(&options.cwd);
     let permission_profile = permission_profile(options.fs, options.net, &sandbox_policy_cwd);
     let mut env = current_env_without_proxy();
@@ -363,7 +360,11 @@ async fn execute_command_capture(
         &permission_profile,
         &sandbox_policy_cwd,
         false,
-        allow_network_for_proxy(options.net == NetMode::Restricted),
+        (options.net == NetMode::Restricted).then_some(&ManagedNetworkSandboxContext {
+            // Preserve Terraform provider IPC while keeping IP traffic proxy-routed.
+            dangerously_allow_all_unix_sockets: true,
+            ..Default::default()
+        }),
     );
 
     let mut child = Command::new(std::env::current_exe()?);
@@ -435,8 +436,6 @@ async fn execute_command_inherit(
     config: &EffectiveConfig,
     approval_manager: Option<Arc<ApprovalManager>>,
 ) -> Result<i32> {
-    ensure_bwrap_available()?;
-
     let sandbox_policy_cwd = workspace_root_or_cwd(&options.cwd);
     let permission_profile = permission_profile(options.fs, options.net, &sandbox_policy_cwd);
     let mut env = current_env_without_proxy();
@@ -454,7 +453,11 @@ async fn execute_command_inherit(
         &permission_profile,
         &sandbox_policy_cwd,
         false,
-        allow_network_for_proxy(options.net == NetMode::Restricted),
+        (options.net == NetMode::Restricted).then_some(&ManagedNetworkSandboxContext {
+            // Preserve Terraform provider IPC while keeping IP traffic proxy-routed.
+            dangerously_allow_all_unix_sockets: true,
+            ..Default::default()
+        }),
     );
 
     #[cfg(unix)]
@@ -640,7 +643,7 @@ async fn start_managed_proxy(
         "allow_local_binding": config.allow_local,
         "domains": Value::Object(domains),
     }))?;
-    let state = build_config_state(config, NetworkProxyConstraints::default())?;
+    let state = build_config_state(config, NetworkProxyConstraints::default(), Platform::Linux)?;
     let state = Arc::new(NetworkProxyState::with_reloader(
         state,
         Arc::new(NoopReloader),
@@ -824,13 +827,6 @@ fn exec_direct_command_inherit(command: Vec<String>, cwd: &Path) -> Result<i32> 
     Err(child.exec()).context("failed to exec command")
 }
 
-fn ensure_bwrap_available() -> Result<()> {
-    if find_system_bwrap_in_path().is_none() {
-        bail!("bubblewrap (bwrap) is required but was not found in PATH")
-    }
-    Ok(())
-}
-
 fn direct_passthrough_mode(options: &RuntimeOptions) -> bool {
     matches!(options.fs, FsMode::Unrestricted) && matches!(options.net, NetMode::Unrestricted)
 }
@@ -841,6 +837,47 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::time::{sleep, Duration};
+
+    #[test]
+    fn managed_network_helper_args_preserve_unix_ipc_grant() {
+        let cwd = Path::new("/tmp");
+        let profile = permission_profile(FsMode::Readonly, NetMode::Restricted, cwd);
+        let context = ManagedNetworkSandboxContext {
+            dangerously_allow_all_unix_sockets: true,
+            ..Default::default()
+        };
+        let args = create_linux_sandbox_command_args_for_permission_profile(
+            vec!["true".to_string()],
+            cwd,
+            &profile,
+            cwd,
+            false,
+            Some(&context),
+        );
+        let index = args
+            .iter()
+            .position(|arg| arg == "--managed-network")
+            .unwrap();
+        let actual: ManagedNetworkSandboxContext = serde_json::from_str(&args[index + 1]).unwrap();
+        assert!(actual.dangerously_allow_all_unix_sockets);
+        assert!(!actual.allow_local_binding);
+        assert_eq!(&args[args.len() - 2..], &["--", "true"]);
+    }
+
+    #[test]
+    fn offline_helper_args_do_not_enable_managed_network() {
+        let cwd = Path::new("/tmp");
+        let profile = permission_profile(FsMode::Readonly, NetMode::None, cwd);
+        let args = create_linux_sandbox_command_args_for_permission_profile(
+            vec!["true".to_string()],
+            cwd,
+            &profile,
+            cwd,
+            false,
+            None,
+        );
+        assert!(!args.iter().any(|arg| arg == "--managed-network"));
+    }
 
     #[derive(Clone)]
     struct CountingBroker {
