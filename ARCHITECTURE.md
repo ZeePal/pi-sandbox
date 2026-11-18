@@ -85,9 +85,8 @@ Codex's helper owns the hard part:
 - **Full bypass is explicit.** Direct passthrough only happens when both filesystem and networking are set to `unrestricted`.
 
 ## Agent state and audit logs
-- In `fs=readonly` / `fs=write`, `~/.pi` and optional `~/.dotfiles/pi` are read-only to tools,
-  including resolved symlink targets. Configuration and extensions remain readable;
-  `auth.json` uses deny mounts, not just read-only access.
+- In `fs=readonly` / `fs=write`, `~/.pi` and `~/.dotfiles/pi` (if present) are read-only to tools.
+  Configuration and extensions remain readable; `~/.pi/agent/auth.json` uses a deny mount, not just read-only access.
 - Only the current cwd's default Pi session folder is readable. Existing JSONL headers
   must also match that cwd, preventing folder-name collisions from exposing another
   workspace. Other session contents are denied; folder names are not hidden.

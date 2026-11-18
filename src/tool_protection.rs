@@ -3,7 +3,6 @@ use codex_protocol::permissions::{
     FileSystemAccessMode, FileSystemPath, FileSystemSandboxEntry, FileSystemSandboxPolicy,
 };
 use codex_utils_path_uri::PathUri;
-use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
@@ -30,19 +29,18 @@ fn protect_path(
     Ok(())
 }
 
-/// Protect agent state and configuration, including symlink destinations.
+/// Protect agent state: `~/.pi` and `~/.dotfiles/pi` read-only, credentials denied, other workspaces' sessions denied.
 pub fn protect_home(policy: &mut FileSystemSandboxPolicy, cwd: &Path) -> Result<()> {
     let home = std::env::var_os("HOME").context("HOME is required to protect agent state")?;
     protect_roots(policy, Path::new(&home), cwd)
 }
 
 fn protect_roots(policy: &mut FileSystemSandboxPolicy, home: &Path, cwd: &Path) -> Result<()> {
-    for root in [home.join(".pi"), home.join(".dotfiles/pi")] {
-        protect_path(policy, &root, FileSystemAccessMode::Read)?;
-    }
-    let sessions = home.join(".pi/agent/sessions");
-    protect_config_targets(policy, &home.join(".pi"), &sessions, &mut HashSet::new())?;
-    protect_sessions(policy, &sessions, cwd)
+    let pi = home.join(".pi");
+    protect_path(policy, &pi, FileSystemAccessMode::Read)?;
+    protect_path(policy, &home.join(".dotfiles/pi"), FileSystemAccessMode::Read)?;
+    protect_path(policy, &pi.join("agent/auth.json"), FileSystemAccessMode::Deny)?;
+    protect_sessions(policy, &pi.join("agent/sessions"), cwd)
 }
 
 fn protect_sessions(
@@ -104,35 +102,6 @@ fn read_entries(path: &Path) -> Result<Vec<PathBuf>> {
     entries.map(|entry| Ok(entry?.path())).collect()
 }
 
-fn protect_config_targets(
-    policy: &mut FileSystemSandboxPolicy,
-    path: &Path,
-    sessions: &Path,
-    seen: &mut HashSet<PathBuf>,
-) -> Result<()> {
-    if path == sessions
-        || matches!((path.canonicalize(), sessions.canonicalize()),
-        (Ok(target), Ok(root)) if target.starts_with(&root))
-    {
-        return Ok(());
-    }
-    let secret = matches!(
-        path.file_name().and_then(|name| name.to_str()),
-        Some("auth.json")
-    );
-    if secret {
-        return protect_path(policy, path, FileSystemAccessMode::Deny);
-    }
-    protect_path(policy, path, FileSystemAccessMode::Read)?;
-    if !path.is_dir() || !seen.insert(path.canonicalize()?) {
-        return Ok(());
-    }
-    for entry in read_entries(path)? {
-        protect_config_targets(policy, &entry, sessions, seen)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,24 +127,6 @@ mod tests {
         assert!(!session_matches_workspace(&path, Path::new("/a/b")).unwrap());
         std::fs::write(&path, "malformed").unwrap();
         assert!(!session_matches_workspace(&path, Path::new("/a-b")).unwrap());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn symlink_targets_are_protected() {
-        let root = std::env::temp_dir().join(format!("pi-protection-{}", std::process::id()));
-        std::fs::create_dir_all(root.join(".pi/agent")).unwrap();
-        std::fs::write(root.join("secret"), "secret").unwrap();
-        std::os::unix::fs::symlink(root.join("secret"), root.join(".pi/agent/auth.json")).unwrap();
-        let mut policy = FileSystemSandboxPolicy::workspace_write(&[], false, false);
-        protect_roots(&mut policy, &root, &root).unwrap();
-        let target = FileSystemPath::Path {
-            path: PathUri::from_host_native_path(root.join("secret")).unwrap(),
-        };
-        assert!(policy
-            .entries
-            .iter()
-            .any(|e| e.path == target && e.access == FileSystemAccessMode::Deny));
         std::fs::remove_dir_all(root).unwrap();
     }
 }
